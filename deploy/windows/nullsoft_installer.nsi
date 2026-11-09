@@ -136,9 +136,11 @@ Section "Uninstall"
     RMDir /r /REBOOTOK "$SMPROGRAMS\$StartMenuFolder\"
     SetShellVarContext current
 
-    ${If} $R1 != 1
-        RMDir /r /REBOOTOK "$APPDATA\${ORGNAME}\"
-    ${EndIf}
+    !ifndef PRESERVE_APPDATA
+        ${If} $R1 != 1
+            RMDir /r /REBOOTOK "$APPDATA\${ORGNAME}\"
+        ${EndIf}
+    !endif
 
     ; Remove ARP + WER
     DeleteRegKey HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"

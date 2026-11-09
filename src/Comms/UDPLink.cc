@@ -390,12 +390,29 @@ void UDPWorker::disconnectLink()
 
 void UDPWorker::writeData(const QByteArray &data)
 {
+    // Inspect only command envelopes; do not log the high-rate joystick stream.
+    const bool mavlink2 = data.size() >= 10 && static_cast<quint8>(data.at(0)) == 0xfd;
+    const bool mavlink1 = data.size() >= 6 && static_cast<quint8>(data.at(0)) == 0xfe;
+    const int messageId = mavlink2
+        ? static_cast<quint8>(data.at(7)) | (static_cast<quint8>(data.at(8)) << 8)
+            | (static_cast<quint8>(data.at(9)) << 16)
+        : (mavlink1 ? static_cast<quint8>(data.at(5)) : -1);
+    const bool traceCommand = messageId == 76 || messageId == 75 || messageId == 11;
     if (!isConnected()) {
+        if (traceCommand) {
+            qCDebug(UDPLinkLog) << "UDP command skipped: disconnected" << data.toHex();
+        }
         emit errorOccurred(tr("Could Not Send Data - Link is Disconnected!"));
         return;
     }
 
     QMutexLocker locker(&_sessionTargetsMutex);
+
+    if (traceCommand) {
+        qCDebug(UDPLinkLog) << "UDP command begin local address/port, manual/session targets, bytes:"
+            << _socket->localAddress() << _socket->localPort()
+            << _udpConfig->targetHosts().size() << _sessionTargets.size() << data.toHex();
+    }
 
     // Send to all manually targeted systems
     for (const std::shared_ptr<UDPClient> &target : _udpConfig->targetHosts()) {
@@ -403,7 +420,13 @@ void UDPWorker::writeData(const QByteArray &data)
             continue;
         }
         if (!containsTarget(_sessionTargets, target->address, target->port)) {
-            if (_socket->writeDatagram(data, target->address, target->port) < 0) {
+            const qint64 written = _socket->writeDatagram(data, target->address, target->port);
+            if (traceCommand) {
+                qCDebug(UDPLinkLog) << "UDP command write manual address/port, expected/written, socket error:"
+                    << target->address << target->port << data.size() << written
+                    << _socket->error() << _socket->errorString();
+            }
+            if (written < 0) {
                 qCWarning(UDPLinkLog) << "Could Not Send Data - Write Failed!";
             }
         }
@@ -411,7 +434,13 @@ void UDPWorker::writeData(const QByteArray &data)
 
     // Send to all connected systems
     for (const std::shared_ptr<UDPClient> &target: _sessionTargets) {
-        if (_socket->writeDatagram(data, target->address, target->port) < 0) {
+        const qint64 written = _socket->writeDatagram(data, target->address, target->port);
+        if (traceCommand) {
+            qCDebug(UDPLinkLog) << "UDP command write session address/port, expected/written, socket error:"
+                << target->address << target->port << data.size() << written
+                << _socket->error() << _socket->errorString();
+        }
+        if (written < 0) {
             qCWarning(UDPLinkLog) << "Could Not Send Data - Write Failed!";
         }
     }

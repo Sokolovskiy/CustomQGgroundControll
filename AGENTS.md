@@ -2,6 +2,12 @@
 
 Instructions for AI coding agents (Codex, Claude Code, etc.) working on QGroundControl.
 
+## Investigation Scope
+
+Start with the component named or affected by the user's request. For Herelink GCS features, inspect the relevant code in `custom/` first, then follow direct dependencies or upstream extension points as needed. Expand beyond that component only when the evidence points to a specific dependency or the user asks for a broader review.
+
+Use [Herelink GCS project context](HERELINK_PROJECT_CONTEXT.md) to recover project decisions, aircraft differences, build commands, and pending verification. Treat historical proposals as references and check the targeted implementation before changing it.
+
 ## Quick References
 
 - [CODING_STYLE.md](CODING_STYLE.md) — Naming, formatting, C++20 features, QML style, logging
@@ -26,7 +32,7 @@ enforced by pre-commit hooks, so ignoring them wastes a build cycle. Full list w
 - **No `QTest::ignoreMessage`** in tests — use `expectLogMessage`/`ignoreLogMessage` (`check-no-qtest-ignore-message`).
 - **No fixed-delay `QTest::qWait(<n>)`** — use `QTRY_*_WITH_TIMEOUT` or `QSignalSpy::wait` (`check-no-fixed-qwait`).
 
-## Critical Files (Read First!)
+## Core References for Relevant Components
 
 1. `src/FactSystem/Fact.h` — Parameter system foundation
 2. `src/Vehicle/Vehicle.h` — Core vehicle model

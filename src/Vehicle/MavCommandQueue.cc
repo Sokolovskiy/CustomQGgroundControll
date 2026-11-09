@@ -10,6 +10,9 @@
 #include "QGCLoggingCategory.h"
 #include "Vehicle.h"
 #include "VehicleLinkManager.h"
+#include "MultiVehicleManager.h"
+
+#include <cmath>
 
 #ifdef QT_DEBUG
 #include "MockLink.h"
@@ -263,7 +266,67 @@ void MavCommandQueue::sendWorker(bool commandInt, bool showError,
                                  int targetCompId, MAV_CMD command, MAV_FRAME frame,
                                  float param1, float param2, float param3, float param4, double param5, double param6, float param7)
 {
-    if (_stopped) {
+    if (_stopped || !_vehicle) {
+        return;
+    }
+
+    // Even a rejected newer request must invalidate an older ARM/DISARM repeat.
+    if (command == MAV_CMD_COMPONENT_ARM_DISARM) {
+        ++_armRetryGeneration;
+    }
+
+    bool reliableSelection = false;
+#ifdef QGC_CUSTOM_BUILD
+    // Only absolute mode selection and this build's camera Relay2 OFF/ON.
+    // ARM/DISARM uses a separate short-window policy below.
+    reliableSelection = !commandInt && !ackHandlerInfo
+        && targetCompId == _vehicle->defaultComponentId()
+        && _vehicle == MultiVehicleManager::instance()->activeVehicle()
+        && param3 == 0 && param4 == 0 && param5 == 0 && param6 == 0 && param7 == 0
+        && ((command == MAV_CMD_DO_SET_MODE && param1 == static_cast<float>(MAV_MODE_FLAG_CUSTOM_MODE_ENABLED)
+             && std::isfinite(param2) && param2 >= 0 && param2 <= 16777215
+             && std::floor(param2) == param2)
+            || (command == MAV_CMD_DO_SET_RELAY && param1 == 1 && (param2 == 0 || param2 == 1)));
+#endif
+    const int selectionKey = reliableSelection ? targetCompId * 65536 + static_cast<int>(command) : 0;
+    const quint64 selectionGeneration = reliableSelection ? ++_selectionGenerations[selectionKey] : 0;
+    const int pendingSelection = findEntryIndex(targetCompId, command);
+    if (reliableSelection && pendingSelection >= 0 && _list[pendingSelection].reliableSelection) {
+        auto &pending = _list[pendingSelection];
+        const auto requestedLink = _vehicle->vehicleLinkManager()->primaryLink().lock();
+        const QPointer<LinkInterface> link = requestedLink.get();
+        const bool armed = _vehicle->armed();
+        QElapsedTimer requestedAt;
+        requestedAt.start();
+        // Keep the previous ACK slot until it terminates. Replace only the
+        // deferred intent, so ACKs cannot immediately complete another request.
+        pending.maxTries = pending.tryCount;
+        pending.nextSelection = [this, link, armed, requestedAt, showError, targetCompId, vehicleId = _vehicle->id(),
+                                 selectionKey, selectionGeneration,
+                                 command, frame, param1, param2, param3, param4, param5, param6, param7] {
+            if (_selectionGenerations.value(selectionKey) != selectionGeneration) {
+                qCDebug(MavCommandQueueLog) << "Discarding superseded selection callback" << command;
+                return;
+            }
+            const auto currentLink = _vehicle ? _vehicle->vehicleLinkManager()->primaryLink().lock() : nullptr;
+            if (_stopped || !_vehicle || !link || currentLink.get() != link
+                || _vehicle != MultiVehicleManager::instance()->activeVehicle()
+                || _vehicle->vehicleLinkManager()->communicationLost()
+                || _vehicle->armed() != armed || requestedAt.elapsed() > 2000) {
+                qCDebug(MavCommandQueueLog) << "Discarding expired or disconnected latest selection" << command;
+                QPointer<MavCommandQueue> guard(this);
+                emit commandResult(vehicleId, targetCompId, command, MAV_RESULT_CANCELLED, MavCmdResultCommandResultOnly);
+                if (!guard) { return; }
+                if (showError && !_stopped) {
+                    QGC::showAppMessage(tr("Pending selection expired or connection/state changed. Select it again when ready."));
+                }
+                return;
+            }
+            sendWorker(false, showError, nullptr, targetCompId, command, frame,
+                       param1, param2, param3, param4, param5, param6, param7);
+        };
+        qCDebug(MavCommandQueueLog) << "Latest selection queued; previous selection will not retry"
+                                  << command << param1 << param2;
         return;
     }
 
@@ -330,22 +393,115 @@ void MavCommandQueue::sendWorker(bool commandInt, bool showError,
     entry.rgParam7          = param7;
     entry.maxTries          = _shouldRetry(command) ? kMaxRetryCount : 1;
     entry.ackTimeoutMSecs   = sharedLink->linkConfiguration()->isHighLatency() ? _ackTimeoutMSecsHighLatency : _ackTimeoutMSecs();
+    entry.reliableSelection = reliableSelection && !sharedLink->linkConfiguration()->isHighLatency();
+    if (entry.reliableSelection) {
+        entry.maxTries = 3;
+        entry.requestedLink = sharedLink.get();
+        entry.requestedArmed = _vehicle->armed();
+    }
+#ifdef QGC_CUSTOM_BUILD
+    const bool shortArmRetry = command == MAV_CMD_COMPONENT_ARM_DISARM
+        && !commandInt && !ackHandlerInfo && _vehicle->apmFirmware()
+        && targetCompId == _vehicle->defaultComponentId()
+        && _vehicle == MultiVehicleManager::instance()->activeVehicle()
+        && sharedLink->isConnected() && !sharedLink->linkConfiguration()->isHighLatency()
+        && !_vehicle->vehicleLinkManager()->communicationLost()
+        && (param1 == 0 || param1 == 1) && _vehicle->armed() != (param1 == 1)
+        && param2 == 0 && param3 == 0 && param4 == 0 && param5 == 0 && param6 == 0 && param7 == 0;
+    if (shortArmRetry) {
+        if (!_armRetryGuardsConnected) {
+            // Invalidate on transitions even if state returns before the timer fires.
+            const auto invalidate = [this] { ++_armRetryGeneration; };
+            connect(_vehicle, &Vehicle::armedChanged, this, invalidate);
+            connect(MultiVehicleManager::instance(), &MultiVehicleManager::activeVehicleChanged, this, invalidate);
+            connect(_vehicle->vehicleLinkManager(), &VehicleLinkManager::primaryLinkChanged, this, invalidate);
+            connect(_vehicle->vehicleLinkManager(), &VehicleLinkManager::communicationLostChanged, this, invalidate);
+            _armRetryGuardsConnected = true;
+        }
+        disconnect(_armRetryLinkConnection);
+        _armRetryLinkConnection = connect(sharedLink.get(), &LinkInterface::disconnected, this,
+                                         [this] { ++_armRetryGeneration; });
+        entry.armRetryGeneration = _armRetryGeneration;
+        entry.requestedLink = sharedLink.get();
+        entry.requestedArmed = _vehicle->armed();
+        entry.maxTries = 2;
+    }
+#endif
     entry.elapsedTimer.start();
 
     qCDebug(MavCommandQueueLog) << "Sending" << _formatCommand(command, param1) << "param1-7:" << command << param1 << param2 << param3 << param4 << param5 << param6 << param7;
 
     _list.append(entry);
+    QPointer<MavCommandQueue> guard(this);
     _sendFromList(_list.count() - 1);
+    if (guard && entry.armRetryGeneration != 0) {
+        QTimer::singleShot(100, Qt::PreciseTimer, this,
+            [this, targetCompId, generation = entry.armRetryGeneration] {
+                const int index = findEntryIndex(targetCompId, MAV_CMD_COMPONENT_ARM_DISARM);
+                if (index < 0 || _list[index].armRetryGeneration != generation) { return; }
+                if (!_armRetryAllowed(_list[index])) {
+                    qCDebug(MavCommandQueueLog) << "Short ARM/DISARM repeat cancelled or expired";
+                    return;
+                }
+                qCInfo(MavCommandQueueLog) << "Short ARM/DISARM repeat param1/elapsed ms:"
+                    << _list[index].rgParam1 << _list[index].armRetryElapsed.elapsed();
+                _sendFromList(index);
+            });
+    }
+}
+
+bool MavCommandQueue::_armRetryAllowed(const MavCommandListEntry_t &entry) const
+{
+    if (_stopped || !_vehicle || entry.armRetryGeneration == 0
+        || entry.armRetryGeneration != _armRetryGeneration || entry.tryCount != 1
+        || !entry.armRetryElapsed.isValid() || entry.armRetryElapsed.elapsed() >= 250
+        || !entry.requestedLink || !entry.requestedLink->isConnected()
+        || _vehicle != MultiVehicleManager::instance()->activeVehicle()
+        || _vehicle->vehicleLinkManager()->communicationLost()
+        || _vehicle->armed() != entry.requestedArmed) {
+        return false;
+    }
+    const auto link = _vehicle->vehicleLinkManager()->primaryLink().lock();
+    return link && link.get() == entry.requestedLink
+        && !link->linkConfiguration()->isHighLatency();
 }
 
 void MavCommandQueue::_sendFromList(int index)
 {
     MavCommandListEntry_t commandEntry = _list[index];
 
+    if (commandEntry.armRetryGeneration != 0 && commandEntry.tryCount > 0
+        && !_armRetryAllowed(commandEntry)) {
+        // The normal ACK timeout may report failure, but must never send a late ARM.
+        _list[index].maxTries = _list[index].tryCount;
+        commandEntry.maxTries = _list[index].maxTries;
+    }
+    if (commandEntry.reliableSelection && commandEntry.tryCount > 0) {
+        const auto currentLink = _vehicle->vehicleLinkManager()->primaryLink().lock();
+        if (!commandEntry.requestedLink || currentLink.get() != commandEntry.requestedLink
+            || _vehicle != MultiVehicleManager::instance()->activeVehicle()
+            || _vehicle->vehicleLinkManager()->communicationLost()
+            || _vehicle->armed() != commandEntry.requestedArmed) {
+            // Fall through to the standard terminal failure path, without sending.
+            _list[index].maxTries = _list[index].tryCount;
+            commandEntry.maxTries = _list[index].maxTries;
+        }
+    }
+
     QString rawCommandName = MissionCommandTree::instance()->rawName(commandEntry.command);
     QString friendlyName = MissionCommandTree::instance()->friendlyName(commandEntry.command);
 
     if (++_list[index].tryCount > commandEntry.maxTries) {
+        if (commandEntry.nextSelection) {
+            _list.removeAt(index);
+            QPointer<MavCommandQueue> guard(this);
+            emit commandResult(_vehicle->id(), commandEntry.targetCompId, commandEntry.command,
+                               MAV_RESULT_CANCELLED, MavCmdResultCommandResultOnly);
+            if (guard && !_stopped) {
+                QTimer::singleShot(0, this, std::move(commandEntry.nextSelection));
+            }
+            return;
+        }
         QString logMsg = QStringLiteral("Giving up sending command after max retries: %1").arg(rawCommandName);
 
         // For REQUEST_MESSAGE commands, also log which message was being requested
@@ -413,8 +569,9 @@ void MavCommandQueue::_sendFromList(int index)
         cmd.target_system =     _vehicle->id();
         cmd.target_component =  commandEntry.targetCompId;
         cmd.command =           commandEntry.command;
-        // MAVLink spec: confirmation increments on each resend.
-        cmd.confirmation =      static_cast<uint8_t>(qMin(commandEntry.tryCount - 1, 255));
+        // Use the incremented queue counter; commandEntry is a pre-increment snapshot.
+        // MAVLink confirmation starts at zero and increments on each resend.
+        cmd.confirmation =      static_cast<uint8_t>(qMin(_list[index].tryCount - 1, 255));
         cmd.param1 =            commandEntry.rgParam1;
         cmd.param2 =            commandEntry.rgParam2;
         cmd.param3 =            commandEntry.rgParam3;
@@ -429,6 +586,17 @@ void MavCommandQueue::_sendFromList(int index)
                                              &cmd);
     }
 
+    if (commandEntry.reliableSelection) {
+        _list[index].elapsedTimer.restart();
+    }
+    if (commandEntry.armRetryGeneration != 0 && commandEntry.tryCount > 0
+        && !_armRetryAllowed(commandEntry)) {
+        qCDebug(MavCommandQueueLog) << "Short ARM/DISARM repeat cancelled before dispatch";
+        return;
+    }
+    if (commandEntry.armRetryGeneration != 0 && commandEntry.tryCount == 0) {
+        _list[index].armRetryElapsed.start();
+    }
     _vehicle->sendMessageOnLinkThreadSafe(sharedLink.get(), msg);
 }
 
@@ -500,6 +668,7 @@ void MavCommandQueue::handleCommandAck(const mavlink_message_t& message, const m
         } else {
             // Command has not completed yet, don't remove
             MavCommandListEntry_t& commandEntryRef = _list[entryIndex];
+            commandEntryRef.armRetryGeneration = 0; // Any ACK, including progress, cancels the short repeat.
             commandEntryRef.maxTries = 1;         // Vehicle responded to command so don't retry
             commandEntryRef.elapsedTimer.start(); // We've heard from vehicle, restart elapsed timer for no ack received timeout
             commandEntry = commandEntryRef;
@@ -512,6 +681,16 @@ void MavCommandQueue::handleCommandAck(const mavlink_message_t& message, const m
     }
 
     MavCommandListEntry_t commandEntry = _list.takeAt(entryIndex);
+    if (commandEntry.nextSelection) {
+        qCDebug(MavCommandQueueLog) << "Previous selection finished; dispatching latest intent" << ack.command;
+        QPointer<MavCommandQueue> guard(this);
+        emit commandResult(_vehicle->id(), commandEntry.targetCompId, commandEntry.command,
+                           MAV_RESULT_CANCELLED, MavCmdResultCommandResultOnly);
+        if (guard && !_stopped) {
+            QTimer::singleShot(0, this, std::move(commandEntry.nextSelection));
+        }
+        return;
+    }
     if (commandEntry.ackHandlerInfo.resultHandler) {
         (*commandEntry.ackHandlerInfo.resultHandler)(commandEntry.ackHandlerInfo.resultHandlerData, message.compid, ack, MavCmdResultCommandResultOnly);
     } else {

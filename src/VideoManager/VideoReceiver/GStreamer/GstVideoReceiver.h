@@ -91,6 +91,7 @@ private:
 
     GstElement *_makeDecoder();
     static GstElement* _makeFileSink(const QString& videoFile, FILE_FORMAT format, const GstCaps* inputCaps);
+    static bool _trackRecordingTimestamps(GstElement* valve);
 
     void _onNewSourcePad(GstPad *pad);
     void _onNewDecoderPad(GstPad *pad);
@@ -104,7 +105,8 @@ private:
     /// -Send an EOS event at the beginning of that branch
     bool _unlinkBranch(GstElement *from);
     void _shutdownDecodingBranch();
-    void _shutdownRecordingBranch();
+    void _shutdownRecordingBranch(STATUS status = STATUS_OK);
+    bool _handleRecordingError(GstObject* source);
     void _logDecodebin3SelectedCodec(GstElement *decodebin3);
 
     bool _needDispatch();
@@ -131,6 +133,7 @@ private:
     GstElement *_fileSink = nullptr;
     GstElement *_pipeline = nullptr;
     mutable QMutex _pipelineMutex;  // serializes _pipeline mutation (worker) vs read in _onBusMessage (streaming thread)
+    GstElement* _recordingSinkForBus = nullptr;  // Protected by _pipelineMutex.
     GstElement *_recorderValve = nullptr;
     GstElement *_source = nullptr;
     GstElement *_tee = nullptr;

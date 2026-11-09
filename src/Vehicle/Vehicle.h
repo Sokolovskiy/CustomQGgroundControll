@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QtCore/QByteArray>
+
 #include <functional>
 #include <memory>
 
@@ -672,6 +674,7 @@ public:
     QString gitHash() const { return _gitHash; }
     quint64 vehicleUID() const { return _uid; }
     QString vehicleUIDStr();
+    const QByteArray &vehicleUID2() const { return _uid2; }
 
     bool soloFirmware() const { return _soloFirmware; }
     void setSoloFirmware(bool soloFirmware);
@@ -1027,6 +1030,7 @@ private:
 
     QString _gitHash;
     quint64 _uid = 0;
+    QByteArray _uid2;
 
     uint64_t    _mavlinkSentCount       = 0;
     uint64_t    _mavlinkReceivedCount   = 0;

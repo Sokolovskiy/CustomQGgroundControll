@@ -7,7 +7,6 @@ QGC_LOGGING_CATEGORY(GStreamerTestLog, "Video.GStreamer.GStreamerTest")
 #ifdef QGC_GST_STREAMING
 
 #include <QtCore/QDir>
-#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QRegularExpression>
@@ -654,7 +653,14 @@ void GStreamerTest::_testRecordingSinkFinalizesMidStreamH265Mp4()
 
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
-    const QString outputPath = QDir(tempDir.path()).filePath(QStringLiteral("mid-stream.mp4"));
+    const QDir tempPath(tempDir.path());
+    const QString videoDirectory = QStringLiteral("\u0412\u0456\u0434\u0435\u043e");
+    QVERIFY(tempPath.mkdir(videoDirectory));
+    const QString outputPath = tempPath.filePath(videoDirectory + QStringLiteral("/mid-stream.mp4"));
+    GstVideoReceiver receiver;
+    receiver._recordingOutput = outputPath;
+    QSignalSpy recordingStarted(&receiver, &VideoReceiver::recordingStarted);
+    std::atomic<bool> erasedTimestamp{false};
 
     GstElement* pipeline = gst_pipeline_new("mid-stream-recording-test");
     QVERIFY(pipeline);
@@ -693,6 +699,26 @@ void GStreamerTest::_testRecordingSinkFinalizesMidStreamH265Mp4()
     QVERIFY(gst_element_link_many(source, upstreamParser, tee, nullptr));
     QVERIFY(gst_element_link_many(tee, displayQueue, displaySink, nullptr));
     QVERIFY(gst_element_link_many(tee, recorderQueue, recorderValve, nullptr));
+    QVERIFY(GstVideoReceiver::_trackRecordingTimestamps(recorderValve));
+
+    GstPad* recorderQueueSrc = gst_element_get_static_pad(recorderQueue, "src");
+    QVERIFY(recorderQueueSrc);
+    const auto eraseFirstRecordingTimestamp = [](GstPad*, GstPadProbeInfo* info, gpointer data) {
+        GstBuffer* buffer = gst_pad_probe_info_get_buffer(info);
+        if (GST_BUFFER_PTS(buffer) != GST_SECOND / 4) {
+            return GST_PAD_PROBE_OK;
+        }
+        buffer = gst_buffer_make_writable(buffer);
+        GST_BUFFER_PTS(buffer) = GST_CLOCK_TIME_NONE;
+        GST_BUFFER_DTS(buffer) = GST_CLOCK_TIME_NONE;
+        GST_PAD_PROBE_INFO_DATA(info) = buffer;
+        static_cast<std::atomic<bool>*>(data)->store(true);
+        return GST_PAD_PROBE_REMOVE;
+    };
+    const gulong eraseProbe = gst_pad_add_probe(recorderQueueSrc, GST_PAD_PROBE_TYPE_BUFFER,
+                                                eraseFirstRecordingTimestamp, &erasedTimestamp, nullptr);
+    gst_object_unref(recorderQueueSrc);
+    QVERIFY(eraseProbe != 0);
 
     std::atomic<int> displayedBuffers{0};
     GstPad* displayPad = gst_element_get_static_pad(displaySink, "sink");
@@ -720,6 +746,8 @@ void GStreamerTest::_testRecordingSinkFinalizesMidStreamH265Mp4()
     QVERIFY(gst_bin_add(GST_BIN(pipeline), fileSink));
     QVERIFY(gst_element_link(recorderValve, fileSink));
     QVERIFY(gst_element_sync_state_with_parent(fileSink));
+    QVERIFY(gst_pad_add_probe(valveSrcPad, GST_PAD_PROBE_TYPE_BUFFER, GstVideoReceiver::_keyframeWatch, &receiver,
+                              nullptr) != 0);
     g_object_set(recorderValve, "drop", FALSE, nullptr);
     gst_clear_object(&valveSrcPad);
 
@@ -730,6 +758,8 @@ void GStreamerTest::_testRecordingSinkFinalizesMidStreamH265Mp4()
     QString failure;
     QVERIFY2(waitForPipelineEos(pipeline, failure), qPrintable(failure));
     (void) gst_element_set_state(pipeline, GST_STATE_NULL);
+    QVERIFY(erasedTimestamp.load());
+    QTRY_COMPARE(recordingStarted.size(), 1);
     QVERIFY2(QFileInfo(outputPath).size() > 0, "Recording did not produce an MP4 file");
 
     GstElement* verifyPipeline = gst_pipeline_new("verify-mid-stream-recording");
@@ -750,7 +780,7 @@ void GStreamerTest::_testRecordingSinkFinalizesMidStreamH265Mp4()
     QVERIFY(verifyDecoder);
     QVERIFY(verifySink);
 
-    const QByteArray outputPathBytes = QFile::encodeName(outputPath);
+    const QByteArray outputPathBytes = outputPath.toUtf8();
     g_object_set(fileSource, "location", outputPathBytes.constData(), nullptr);
     g_object_set(verifySink, "sync", FALSE, "async", FALSE, nullptr);
     gst_bin_add_many(GST_BIN(verifyPipeline), fileSource, demux, verifyParser, verifyDecoder, verifySink, nullptr);

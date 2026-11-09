@@ -3,13 +3,16 @@
 #include <functional>
 
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QObject>
+#include <QtCore/QPointer>
 #include <QtCore/QTimer>
 
 #include "VehicleTypes.h"
 
 class Vehicle;
+class LinkInterface;
 
 /// \brief Owns the COMMAND_LONG / COMMAND_INT send/retry/ack pipeline for a single Vehicle.
 ///
@@ -91,11 +94,18 @@ private:
         int                     tryCount            = 0;
         QElapsedTimer           elapsedTimer;
         int                     ackTimeoutMSecs     = 0;
+        bool                    reliableSelection   = false;
+        bool                    requestedArmed      = false;
+        QPointer<LinkInterface> requestedLink;
+        quint64                 armRetryGeneration  = 0;
+        QElapsedTimer           armRetryElapsed;
+        std::function<void()>   nextSelection;
     } MavCommandListEntry_t;
 
     void sendCommandWithLambdaFallbackWorker(std::function<void()> lambda, bool commandInt, int compId, MAV_CMD command, MAV_FRAME frame, bool showError, float param1, float param2, float param3, float param4, double param5, double param6, float param7);
 
     void _sendFromList(int index);
+    bool _armRetryAllowed(const MavCommandListEntry_t &entry) const;
     static bool _shouldRetry(MAV_CMD command);
     static bool _canBeDuplicated(MAV_CMD command);
     static int _responseCheckIntervalMSecs();
@@ -104,6 +114,10 @@ private:
 
     Vehicle*                         _vehicle = nullptr;
     QList<MavCommandListEntry_t>     _list;
+    QHash<int, quint64>              _selectionGenerations;
+    quint64                         _armRetryGeneration = 0;
+    bool                            _armRetryGuardsConnected = false;
+    QMetaObject::Connection          _armRetryLinkConnection;
     QTimer                           _responseCheckTimer;
     bool                             _stopped = false;  // set by stop(), gates all send paths
 

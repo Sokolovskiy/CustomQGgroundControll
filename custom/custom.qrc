@@ -1,0 +1,22 @@
+<RCC>
+    <qresource prefix="/Herelink">
+        <file alias="herelink-gcs.ico">resources/herelink-gcs.ico</file>
+        <file alias="fatum.jpg">resources/fatum.jpg</file>
+        <file alias="reticle.png">resources/reticle.png</file>
+        <file alias="antenna.svg">../resources/Antenna_T.svg</file>
+        <file alias="roll.svg">resources/roll.svg</file>
+        <file alias="pitch.svg">resources/pitch.svg</file>
+        <file alias="MainWindowSavedState.qml">qml/MainWindowSavedState.qml</file>
+        <file alias="FlightModeIndicator.qml">qml/FlightModeIndicator.qml</file>
+        <file alias="FlyViewToolStripActionList.qml">qml/FlyViewToolStripActionList.qml</file>
+        <file alias="FlyViewCustomLayer.qml">qml/FlyViewCustomLayer.qml</file>
+        <file alias="HerelinkOsdView.qml">qml/HerelinkOsdView.qml</file>
+        <file alias="OsdPanel.qml">qml/OsdPanel.qml</file>
+        <file alias="OsdStick.qml">qml/OsdStick.qml</file>
+        <file alias="CameraTiltIndicator.qml">qml/CameraTiltIndicator.qml</file>
+        <file alias="DroneAttitude3D.qml">qml/DroneAttitude3D.qml</file>
+        <file alias="AttitudeArrow3D.qml">qml/AttitudeArrow3D.qml</file>
+        <file alias="FlyViewBottomRightRowLayout.qml">qml/FlyViewBottomRightRowLayout.qml</file>
+        <file alias="FlyViewTopRightColumnLayout.qml">qml/FlyViewTopRightColumnLayout.qml</file>
+    </qresource>
+</RCC>

@@ -301,6 +301,8 @@ void InitialConnectStateMachine::_handleAutopilotVersionSuccess(const mavlink_me
     mavlink_msg_autopilot_version_decode(&message, &autopilotVersion);
 
     vehicle()->_uid = (quint64)autopilotVersion.uid;
+    const QByteArray uid2(reinterpret_cast<const char *>(autopilotVersion.uid2), sizeof(autopilotVersion.uid2));
+    vehicle()->_uid2 = uid2.count('\0') == uid2.size() ? QByteArray{} : uid2;
     vehicle()->_firmwareBoardVendorId = autopilotVersion.vendor_id;
     vehicle()->_firmwareBoardProductId = autopilotVersion.product_id;
     emit vehicle()->vehicleUIDChanged();

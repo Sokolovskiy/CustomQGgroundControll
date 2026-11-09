@@ -1647,6 +1647,9 @@ void Joystick::_executeButtonAction(const QString &action, const ButtonEvent_t b
     for (int i = 0; i < _mavlinkActionManager->actions()->count(); i++) {
         MavlinkAction *const mavlinkAction = _mavlinkActionManager->actions()->value<MavlinkAction*>(i);
         if (action == mavlinkAction->label()) {
+            if (QGCCorePlugin::instance()->handleJoystickMavlinkAction(vehicle, action)) {
+                return;
+            }
             qCDebug(JoystickLog) << "Button Action: Sending MAVLink action" << action;
             mavlinkAction->sendTo(vehicle);
             return;
