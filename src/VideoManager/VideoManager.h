@@ -31,6 +31,7 @@ class VideoManager : public QObject
     Q_PROPERTY(bool     decoding                READ decoding                                   NOTIFY decodingChanged)
     Q_PROPERTY(bool     fullScreen              READ fullScreen             WRITE setfullScreen NOTIFY fullScreenChanged)
     Q_PROPERTY(bool     hasThermal              READ hasThermal                                 NOTIFY decodingChanged)
+    Q_PROPERTY(bool     scorpionPipAvailable    READ scorpionPipAvailable                      NOTIFY scorpionPipAvailableChanged)
     Q_PROPERTY(bool     hasVideo                READ hasVideo                                   NOTIFY hasVideoChanged)
     Q_PROPERTY(bool     isStreamSource          READ isStreamSource                             NOTIFY isStreamSourceChanged)
     Q_PROPERTY(bool     isUvc                   READ isUvc                                      NOTIFY isUvcChanged)
@@ -57,6 +58,7 @@ public:
     Q_INVOKABLE void startVideo();
     Q_INVOKABLE void stopRecording();
     Q_INVOKABLE void stopVideo();
+    Q_INVOKABLE void setScorpionPipEnabled(bool enabled);
 
     void init(QQuickWindow *mainWindow);
     void startVideoBackendInit();
@@ -67,6 +69,7 @@ public:
     bool fullScreen() const { return _fullScreen; }
     bool hasThermal() const;
     bool hasVideo() const;
+    bool scorpionPipAvailable() const { return _scorpionPipAvailable; }
     bool isStreamSource() const;
     bool isUvc() const;
     bool recording() const { return _recording; }
@@ -95,6 +98,7 @@ signals:
     void streamingChanged();
     void uvcVideoSourceIDChanged();
     void videoSizeChanged();
+    void scorpionPipAvailableChanged();
 
 private slots:
     void _communicationLostChanged(bool communicationLost);
@@ -138,6 +142,8 @@ private:
     bool _initialized = false;
     bool _backendDisabledForTests = false;
     bool _fullScreen = false;
+    bool _scorpionPipEnabled = false;
+    bool _scorpionPipAvailable = false;
 
     QAtomicInteger<bool> _decoding = false;
     QAtomicInteger<bool> _recording = false;
