@@ -2,6 +2,9 @@
 
 For installation and first-time setup, see the [Ukrainian user guide](USER_GUIDE.uk.md).
 
+For Windows TX16SMK3 button recovery, channel numbering and diagnostics, see
+[RC control diagnosis](RC_CONTROL_DIAGNOSIS.md).
+
 ## Windows release installer
 
 Build from the repository root with the same x64 MSVC, Qt and GStreamer versions

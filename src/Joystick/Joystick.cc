@@ -160,6 +160,7 @@ Joystick::Joystick(const QString &name, int axisCount, int buttonCount, int hatC
     _buildAvailableButtonsActionList(MultiVehicleManager::instance()->activeVehicle());
 
     _loadFromSettingsIntoCalibrationData();
+    QGCCorePlugin::instance()->initializeJoystickSettings(this);
 }
 
 Joystick::~Joystick()
@@ -788,6 +789,10 @@ void Joystick::_handleButtons()
         const int buttonDelay = static_cast<int>(1000.0 / _joystickSettings.buttonFrequencyHz()->rawValue().toDouble());
         QSet<QString> executedActions;
         for (int buttonIndex = 0; buttonIndex < _totalButtonCount; buttonIndex++) {
+            if (_buttonEventStates[buttonIndex] == ButtonEventDownTransition) {
+                qCDebug(JoystickLog) << "Input device/button/action:" << name() << buttonIndex
+                                     << getButtonAction(buttonIndex);
+            }
             if (!_assignedButtonActions[buttonIndex]) {
                 continue;
             }
@@ -1535,6 +1540,7 @@ void Joystick::setButtonAction(int button, const QString& actionName)
         settings.setValue(actionNameKey, _buttonActionNone);
         settings.setValue(repeatKey, false);
     } else {
+        _addAvailableButtonActionIfMissing(actionName);
         if (!_assignedButtonActions[button]) {
             _assignedButtonActions[button] = new AssignedButtonAction(actionName, false /* repeat */);
         } else {

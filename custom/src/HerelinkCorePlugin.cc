@@ -1,10 +1,16 @@
 #include "HerelinkCorePlugin.h"
-#include "HerelinkOsd.h"
 
 #include <QtCore/QApplicationStatic>
-#include <QtQml/QQmlApplicationEngine>
+#include <QtCore/QRegularExpression>
+#include <QtCore/QSettings>
 #include <QtQml/QQmlAbstractUrlInterceptor>
+#include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
+
+#include "HerelinkOsd.h"
+#include "Joystick.h"
+#include "JoystickSettings.h"
+#include "QGCLoggingCategory.h"
 
 namespace {
 class HerelinkResourceInterceptor final : public QQmlAbstractUrlInterceptor
@@ -48,6 +54,7 @@ public:
 }
 
 Q_APPLICATION_STATIC(HerelinkCorePlugin, herelinkCorePluginInstance);
+QGC_LOGGING_CATEGORY(HerelinkJoystickLog, "Herelink.Joystick")
 
 HerelinkCorePlugin::HerelinkCorePlugin(QObject *parent)
     : QGCCorePlugin(parent)
@@ -87,6 +94,41 @@ QString HerelinkCorePlugin::stableVersionCheckFileUrl() const
 {
     // Preserve the version-check behavior of the previous branding-only build.
     return QStringLiteral("https://s3-us-west-2.amazonaws.com/qgroundcontrol/latest/QGC.version.txt");
+}
+
+void HerelinkCorePlugin::initializeJoystickSettings(Joystick* joystick)
+{
+    // This is the USB layout recorded in the working Windows profile, not an RC/PWM profile.
+    static const QRegularExpression deviceName(QStringLiteral("^OpenTX TX16SMK3 Joystick(?: #[0-9]+)?$"));
+    if (!joystick || !deviceName.match(joystick->name()).hasMatch() || joystick->axisCount() != 5 ||
+        joystick->buttonCount() != 7) {
+        return;
+    }
+
+    QSettings settings;
+    settings.beginGroup(joystick->settings()->settingsGroup());
+    const QString migrationKey = QStringLiteral("HerelinkButtonProfileV1");
+    if (settings.value(migrationKey, false).toBool()) {
+        return;
+    }
+
+    // Preserve any existing assignment. After migration, intentional No Action edits stay cleared.
+    bool emptyProfile = true;
+    for (int button = 2; button <= 6; ++button) {
+        emptyProfile = emptyProfile && joystick->getButtonAction(button) == QStringLiteral("No Action");
+    }
+    if (emptyProfile) {
+        const QStringList actions = {QStringLiteral("Altitude Hold"), QStringLiteral("Position Hold"),
+                                     QStringLiteral("Land"), QStringLiteral("Camera Relay OFF"),
+                                     QStringLiteral("Camera Relay ON")};
+        for (int index = 0; index < actions.size(); ++index) {
+            joystick->setButtonAction(index + 2, actions[index]);
+        }
+        qCDebug(HerelinkJoystickLog) << "Restored Windows button profile:" << joystick->name()
+                                     << "settings:" << settings.fileName() << settings.group();
+    }
+    settings.setValue(migrationKey, true);
+    settings.sync();
 }
 
 bool HerelinkCorePlugin::handleJoystickMavlinkAction(Vehicle *vehicle, const QString &label)

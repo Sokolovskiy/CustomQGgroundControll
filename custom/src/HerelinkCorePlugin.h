@@ -17,6 +17,7 @@ public:
     QQmlApplicationEngine *createQmlApplicationEngine(QObject *parent) override;
     void destroyQmlApplicationEngine(QQmlApplicationEngine *engine) override;
     QString stableVersionCheckFileUrl() const override;
+    void initializeJoystickSettings(Joystick* joystick) override;
     bool handleJoystickMavlinkAction(Vehicle *vehicle, const QString &label) override;
 
 private:

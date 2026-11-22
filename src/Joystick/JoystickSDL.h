@@ -157,6 +157,7 @@ private:
     QList<int> _gamepadAxes;
     QList<int> _nonGamepadAxes;
     int _instanceId = -1;
+    QString _deviceName;
 
     SDL_Joystick *_sdlJoystick = nullptr;
     SDL_Gamepad *_sdlGamepad = nullptr;

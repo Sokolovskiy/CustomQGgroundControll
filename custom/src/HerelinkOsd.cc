@@ -447,6 +447,15 @@ void HerelinkOsd::observeSent(const QByteArray &bytes)
             mavlink_msg_rc_channels_override_decode(&message, &channels);
             if (channels.target_system == _vehicle->id()
                 && (channels.target_component == _vehicle->defaultComponentId() || channels.target_component == MAV_COMP_ID_ALL)) {
+                const qint64 stamp = now();
+                if (_lastRcDiagnosticAt < 0 || stamp - _lastRcDiagnosticAt >= 1000) {
+                    _lastRcDiagnosticAt = stamp;
+                    qCDebug(HerelinkControlLog)
+                        << "Outgoing RC_CHANNELS_OVERRIDE target/CH1-10:" << channels.target_system
+                        << channels.target_component << channels.chan1_raw << channels.chan2_raw << channels.chan3_raw
+                        << channels.chan4_raw << channels.chan5_raw << channels.chan6_raw << channels.chan7_raw
+                        << channels.chan8_raw << channels.chan9_raw << channels.chan10_raw;
+                }
                 // The existing TX16S camera axis uses Additional Axis 6 -> RC10.
                 // Observe the calibrated command, never drive or remap the servo.
                 if (channels.chan10_raw >= 1000 && channels.chan10_raw <= 2000) {

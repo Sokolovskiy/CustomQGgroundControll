@@ -110,6 +110,7 @@ private:
     qint64 _cameraTiltAt = -1;
     double _cameraTiltDegrees = 0;
     quint64 _joystickGeneration = 0;
+    qint64 _lastRcDiagnosticAt = -1;
     QPointer<LinkInterface> _link;
     qint64 _radioStatusAt = -1;
     int _radioRssi = 0;

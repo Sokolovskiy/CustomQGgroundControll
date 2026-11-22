@@ -70,6 +70,7 @@ ColumnLayout {
 
             Component.onCompleted: _findCurrentButtonAction()
             Connections { target: buttonAssignmentRow; function onSelectedButtonIndexChanged() { buttonActionCombo._findCurrentButtonAction() } }
+            Connections { target: joystick; function onButtonActionsChanged() { buttonActionCombo._findCurrentButtonAction() } }
         }
 
         QGCCheckBox {

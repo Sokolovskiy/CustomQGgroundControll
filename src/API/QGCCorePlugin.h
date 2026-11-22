@@ -9,6 +9,7 @@
 class ComplexMissionItem;
 class FactMetaData;
 class LinkInterface;
+class Joystick;
 class PlanCreator;
 class PlanMasterController;
 class QFile;
@@ -124,6 +125,8 @@ public:
     /// @return true: Allow vehicle to continue processing, false: Vehicle should not process message
     virtual bool mavlinkMessage(Vehicle *vehicle, LinkInterface *link, const mavlink_message_t &message) { Q_UNUSED(vehicle); Q_UNUSED(link); Q_UNUSED(message); return true; }
 
+    /// Called after stored joystick settings load, before polling starts. Only base Joystick APIs are available.
+    virtual void initializeJoystickSettings(Joystick* joystick) { Q_UNUSED(joystick); }
     /// Return true if the custom build handled this joystick MAVLink action.
     virtual bool handleJoystickMavlinkAction(Vehicle *vehicle, const QString &label) { Q_UNUSED(vehicle); Q_UNUSED(label); return false; }
 
