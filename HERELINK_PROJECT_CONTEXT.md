@@ -19,6 +19,38 @@ Snapshot from 2026-11-07. This document records the project's technical decision
 
 The original baseline passed 191 of 197 Unit tests. The six known failures are `GeoTagControllerTest`, `BluetoothWorkerTest`, `QGCArchiveModelTest`, `QGCCompressionTest`, `JsonResourceAuditTest`, and `PlatformTest`. The initial custom build reproduced those six. This is historical evidence, so report any later verification separately.
 
+## Android handheld port (2026-11-16)
+
+- The user confirmed Android **7.1.2** and requested the custom interface with **stock Herelink QGC
+  controls**. Keep the Windows control customizations out of the handheld build.
+- Sources and instructions are in [custom/android-herelink](custom/android-herelink/README.md).
+  Preparation uses a separate CubePilot checkout under `.cache/herelink-android-source`, pinned to
+  `eff16bdf347b8aba6bd7cdbb2e25a306adf96ac7` (`v5.0.8.5-herelink`). The Android toolchain lives
+  under `.cache/herelink-toolchain`: Qt 6.6.3, NDK r25b, JDK 17, API 25 runtime, ARM64.
+- Run `./custom/android-herelink/build.ps1` from the main repository root. The intended signed
+  development artifact is `build-herelink-android/FatumHerelink-android7-arm64.apk`; its package ID
+  is `org.fatum.herelink.gcs`. The local development signing key stays in the toolchain cache.
+- The OSD reads native Facts and passive telemetry. Native connection, buttons, modes, camera
+  switching, arming, confirmations and failsafes stay in the CubePilot plugin. Camera tilt and
+  SD-card callsign have no native source in this port and remain unavailable.
+- The first device launch failed on unresolved sibling QML types after resource interception.
+  The layer now explicitly imports `qrc:/Herelink`, and the upstream Quit handler guards a missing
+  root window. A regression test exercises the intercepted stock URL. The corrected APK was
+  installed over ADB and opened the main window on the Android 7.1.2 Optimus handheld.
+- Android OSD panels anchor to viewport edges rather than native corner insets. In video view,
+  the stock bottom-right compass/telemetry are hidden and native action buttons sit below the
+  OSD mode badge. The PiP/map toggle sits above the lower-left OSD. This layout was installed
+  and visually verified over ADB; the map retains its stock instruments and control actions are unchanged.
+- Physical controls and video still require a handheld bench check. Run one
+  GCS app at a time because the native connection ports are shared. See the port guide for the
+  exact build and validation status.
+- The Android attitude model now includes yaw relative to its initial valid heading, resets
+  that reference after attitude loss/vehicle changes, and uses the same frame for motion arrows.
+  Native Facts remain the attitude source; no flight-control behavior changes are involved.
+  The user confirmed physical yaw tracking on the connected aircraft after the update. An
+  independent pre-update SIGABRT/invalid-free crash was captured in `QObject::event`; its cause
+  remains unisolated and is recorded in the Android port guide.
+
 ## Hardware and controls
 
 The Windows PC normally uses two Herelink units in AirUnit-to-AirUnit mode, an ArduPilot flight controller, and a RadioMaster TX16S over USB/SDL. The handheld Herelink controller is a separate setup and can send SBUS to the FC. The official application verified telemetry, video and joystick integration. The PC setup observed in diagnostic logs uses UDP port `14552` and GroundUnit peer `192.168.144.11`. Keep those values scoped to the observed setup.
