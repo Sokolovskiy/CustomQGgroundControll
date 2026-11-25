@@ -53,6 +53,12 @@ The original baseline passed 191 of 197 Unit tests. The six known failures are `
 
 ## Hardware and controls
 
+- The Windows distribution includes the supplied TX16S EdgeTX 2.12.4 template
+  at `TEMPLATES/2.Personal/HERELINK.yml`. Create models through New Model →
+  Personal rather than copying numbered files into `MODELS`. The standalone
+  archive is tracked in `custom/artifacts/tx16s`; the supplied YAML bytes and
+  control mappings are preserved. GCS calibration remains specific to the PC.
+
 The Windows PC normally uses two Herelink units in AirUnit-to-AirUnit mode, an ArduPilot flight controller, and a RadioMaster TX16S over USB/SDL. The handheld Herelink controller is a separate setup and can send SBUS to the FC. The official application verified telemetry, video and joystick integration. The PC setup observed in diagnostic logs uses UDP port `14552` and GroundUnit peer `192.168.144.11`. Keep those values scoped to the observed setup.
 
 - ARM and DISARM are manual in the Fly View readiness panel. CH5 is unassigned for PC control. The earlier CH5 interlock request was superseded. Keep standard pre-arm and emergency behavior.
