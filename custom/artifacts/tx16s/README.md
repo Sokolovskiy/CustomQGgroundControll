@@ -3,7 +3,14 @@
 `HERELINK-template.zip` contains the supplied EdgeTX 2.12.4 template at
 `TEMPLATES/2.Personal/HERELINK.yml`. The YAML is preserved byte for byte from
 the user's SD card; its SHA-256 is
-`5b20fb8c254b7da1b93da5e0b284451321bb19b9a22781b172e9cbae9d0603fb`.
+`9b511b496e4c2add7a9a56bebd2a38a7b35b80f2b635e332ab390aac5bf162a8`.
+
+Updated on 2026-11-28 from the user's `E:/TEMPLATES/2.Personal/HERELINK.yml`.
+CH5 uses the momentary SH switch with the DISARM label; CH12 has no mixer source.
+The USB CH5 mapping remains buttons 0/1 in Normal two-position mode. USB Pitch
+axis inversion is now off; verify pitch direction during GCS calibration when
+adopting this template. The remaining supplied configuration is preserved in
+the archive without re-encoding the YAML.
 
 Copy the archive's `TEMPLATES` folder to the radio's SD card root, then use
 **Manage Models → New Model → 2.Personal / Personal → HERELINK** to create a

@@ -58,6 +58,12 @@ The original baseline passed 191 of 197 Unit tests. The six known failures are `
   Personal rather than copying numbered files into `MODELS`. The standalone
   archive is tracked in `custom/artifacts/tx16s`; the supplied YAML bytes and
   control mappings are preserved. GCS calibration remains specific to the PC.
+- On 2026-11-28 the user supplied a replacement `E:/TEMPLATES/2.Personal/HERELINK.yml`.
+  The template archive preserves its bytes exactly (YAML SHA-256
+  `9b511b496e4c2add7a9a56bebd2a38a7b35b80f2b635e332ab390aac5bf162a8`).
+  CH5 now uses SH / DISARM, CH12's mixer source is NONE, and USB Pitch inversion
+  is off. GCS buttons 0/1 remain the CH5 input. Verify Pitch direction when using
+  this template; the Windows installer and FC parameters do not change for this update.
 
 The Windows PC normally uses two Herelink units in AirUnit-to-AirUnit mode, an ArduPilot flight controller, and a RadioMaster TX16S over USB/SDL. The handheld Herelink controller is a separate setup and can send SBUS to the FC. The official application verified telemetry, video and joystick integration. The PC setup observed in diagnostic logs uses UDP port `14552` and GroundUnit peer `192.168.144.11`. Keep those values scoped to the observed setup.
 
