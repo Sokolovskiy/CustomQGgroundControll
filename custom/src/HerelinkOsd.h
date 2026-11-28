@@ -14,7 +14,7 @@ class Vehicle;
 class Joystick;
 class LinkInterface;
 
-// Presentation model and camera routing for the active vehicle.
+// OSD state, camera routing and CH5 emergency control for the active vehicle.
 class HerelinkOsd : public QObject
 {
     Q_OBJECT
@@ -79,6 +79,9 @@ private:
     void refresh();
     void observeSent(const QByteArray &bytes);
     void advanceTimer(bool connected, bool armed, qint64 stamp);
+    bool disarmInputAvailable(qint64 stamp) const;
+    void resetDisarmHold();
+    void updateDisarmChannel(quint64 buttons, qint64 sampleAt);
     void setAttitudeSample(const QQuaternion &attitude, qint64 stamp);
     void refreshAttitude(bool connected, qint64 stamp);
     void resetAttitude();
@@ -89,6 +92,11 @@ private:
     QPointer<Joystick> _joystick;
     QList<QMetaObject::Connection> _vehicleConnections;
     QMetaObject::Connection _axisConnection;
+    QMetaObject::Connection _buttonConnection;
+    qint64 _disarmSampleAt = -1, _disarmHoldStart = -1, _disarmCommandAt = -1;
+    qint64 _disarmResetAt = -1;
+    bool _disarmReady = false, _disarmPending = false;
+    QString _disarmStatus;
     QTimer _timer;
     QVariantMap _data;
     QVariantMap _attitudeVectors;
@@ -110,6 +118,7 @@ private:
     qint64 _cameraTiltAt = -1;
     double _cameraTiltDegrees = 0;
     quint64 _joystickGeneration = 0;
+    qint64 _lastRcDiagnosticAt = -1;
     QPointer<LinkInterface> _link;
     qint64 _radioStatusAt = -1;
     int _radioRssi = 0;

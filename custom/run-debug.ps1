@@ -24,7 +24,7 @@ $stdoutFile = Join-Path $sessionDirectory 'stdout.log'
 $stderrFile = Join-Path $sessionDirectory 'commands.log'
 
 # Use QGC's category filter: QT_LOGGING_RULES alone cannot enable these categories.
-$categories = 'Herelink.ControlDiagnostics,Vehicle.MavCommandQueue,Vehicle,Joystick.Joystick,QMLControls.MavlinkAction,Comms.UDPLink'
+$categories = 'Herelink.ControlDiagnostics,Herelink.Joystick,Vehicle.MavCommandQueue,Vehicle,Joystick.Joystick,Joystick.JoystickManager,Joystick.JoystickSDL,QMLControls.MavlinkAction,Comms.UDPLink'
 $application = Start-Process -FilePath $executable -WorkingDirectory (Split-Path -Parent $executable) `
     -ArgumentList @('--logging', $categories) -RedirectStandardOutput $stdoutFile `
     -RedirectStandardError $stderrFile -PassThru

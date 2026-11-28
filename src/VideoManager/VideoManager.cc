@@ -28,6 +28,7 @@
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QRunnable>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
 #include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
@@ -41,6 +42,11 @@ static constexpr const char *kFileExtension[VideoReceiver::FILE_FORMAT_MAX + 1] 
 };
 
 Q_APPLICATION_STATIC(VideoManager, _videoManagerInstance);
+
+static bool isScorpionPipReceiver(const VideoReceiver *receiver)
+{
+    return receiver && receiver->name() == QStringLiteral("scorpionPipVideo");
+}
 
 VideoManager::VideoManager(QObject *parent)
     : QObject(parent)
@@ -280,7 +286,8 @@ void VideoManager::_createVideoReceivers()
 #endif
     static const QStringList videoStreamList = {
         "videoContent",
-        "thermalVideo"
+        "thermalVideo",
+        "scorpionPipVideo"
     };
 
     QStringList existing;
@@ -371,6 +378,9 @@ void VideoManager::startRecording(const QString &videoFile)
     const QString videoFileNameTemplate = savePath + "/" + videoFileUrl + ".%1" + ext;
 
     for (VideoReceiver *receiver : std::as_const(_videoReceivers)) {
+        if (isScorpionPipReceiver(receiver)) {
+            continue; // Optional PiP is never part of the primary recording.
+        }
         if (!receiver->started()) {
             qCDebug(VideoManagerLog) << "Video receiver is not ready.";
             continue;
@@ -384,7 +394,9 @@ void VideoManager::startRecording(const QString &videoFile)
 void VideoManager::stopRecording()
 {
     for (VideoReceiver *receiver : std::as_const(_videoReceivers)) {
-        receiver->stopRecording();
+        if (!isScorpionPipReceiver(receiver)) {
+            receiver->stopRecording();
+        }
     }
 }
 
@@ -400,6 +412,9 @@ void VideoManager::grabImage(const QString &imageFile)
     emit imageFileChanged(_imageFile);
 
     for (VideoReceiver *receiver : std::as_const(_videoReceivers)) {
+        if (isScorpionPipReceiver(receiver)) {
+            continue;
+        }
         receiver->takeScreenshot(_imageFile);
         // QSharedPointer<QQuickItemGrabResult> result = receiver->widget()->grabToImage(const QSize &targetSize = QSize())
     }
@@ -518,6 +533,11 @@ void VideoManager::_videoSourceChanged()
     if (_activeVehicle) {
         QGCCameraManager* camMgr = _activeVehicle->cameraManager();
         for (VideoReceiver *receiver : std::as_const(_videoReceivers)) {
+            if (isScorpionPipReceiver(receiver)) {
+                receiver->setVideoStreamInfo(nullptr);
+                changed |= _updateSettings(receiver);
+                continue;
+            }
             QGCVideoStreamInfo* info = nullptr;
             if (receiver->isThermal()) {
                 info = camMgr ? camMgr->thermalStreamInstance() : nullptr;
@@ -685,6 +705,27 @@ bool VideoManager::_updateSettings(VideoReceiver *receiver)
         // No settingsChanged: autoReconnect is live, doesn't require pipeline restart.
     }
 
+    if (isScorpionPipReceiver(receiver)) {
+        QString uri;
+        if (_scorpionPipEnabled && _activeVehicle && hasVideo()) {
+            const QString source = _videoSettings->videoSource()->rawValue().toString();
+            QString primaryUri;
+            if (source == VideoSettings::videoSourceRTSP) {
+                primaryUri = _videoSettings->rtspUrl()->rawValue().toString();
+            } else if (source == VideoSettings::videoSourceHerelinkHotspot) {
+                primaryUri = QStringLiteral("rtsp://192.168.43.1:8554/fpv_stream");
+            }
+
+            QUrl url(primaryUri);
+            if (url.isValid() && url.scheme() == QStringLiteral("rtsp")
+                && url.path() == QStringLiteral("/fpv_stream")) {
+                url.setPath(QStringLiteral("/fpv_stream1"));
+                uri = url.toString();
+            }
+        }
+        return _updateVideoUri(receiver, uri) || settingsChanged;
+    }
+
     if (receiver->isThermal()) {
         return settingsChanged;
     }
@@ -747,6 +788,10 @@ void VideoManager::_setActiveVehicle(Vehicle *vehicle)
     }
 
     _activeVehicle = vehicle;
+    if (_scorpionPipAvailable) {
+        _scorpionPipAvailable = false;
+        emit scorpionPipAvailableChanged();
+    }
     if (_activeVehicle) {
         (void) connect(_activeVehicle->vehicleLinkManager(), &VehicleLinkManager::communicationLostChanged, this, &VideoManager::_communicationLostChanged);
         if (_activeVehicle->cameraManager()) {
@@ -758,6 +803,10 @@ void VideoManager::_setActiveVehicle(Vehicle *vehicle)
         }
 
         for (VideoReceiver *receiver : std::as_const(_videoReceivers)) {
+            if (isScorpionPipReceiver(receiver)) {
+                receiver->setVideoStreamInfo(nullptr);
+                continue;
+            }
             if (_activeVehicle->cameraManager()) {
                 if (receiver->isThermal()) {
                     receiver->setVideoStreamInfo(_activeVehicle->cameraManager()->thermalStreamInstance());
@@ -913,7 +962,7 @@ void VideoManager::_initVideoReceiver(VideoReceiver *receiver, QQuickWindow *win
 
     (void) connect(receiver, &VideoReceiver::streamingChanged, this, [this, receiver](bool active) {
         qCDebug(VideoManagerLog) << "Video" << receiver->name() << "streaming changed, active:" << (active ? "yes" : "no");
-        if (!receiver->isThermal()) {
+        if (!receiver->isThermal() && !isScorpionPipReceiver(receiver)) {
             _streaming = active;
             emit streamingChanged();
         }
@@ -921,7 +970,13 @@ void VideoManager::_initVideoReceiver(VideoReceiver *receiver, QQuickWindow *win
 
     (void) connect(receiver, &VideoReceiver::decodingChanged, this, [this, receiver](bool active) {
         qCDebug(VideoManagerLog) << "Video" << receiver->name() << "decoding changed, active:" << (active ? "yes" : "no");
-        if (!receiver->isThermal()) {
+        if (isScorpionPipReceiver(receiver)) {
+            const bool available = _scorpionPipEnabled && active;
+            if (_scorpionPipAvailable != available) {
+                _scorpionPipAvailable = available;
+                emit scorpionPipAvailableChanged();
+            }
+        } else if (!receiver->isThermal()) {
             _decoding = active;
             emit decodingChanged();
         }
@@ -929,7 +984,7 @@ void VideoManager::_initVideoReceiver(VideoReceiver *receiver, QQuickWindow *win
 
     (void) connect(receiver, &VideoReceiver::recordingChanged, this, [this, receiver](bool active) {
         qCDebug(VideoManagerLog) << "Video" << receiver->name() << "recording changed, active:" << (active ? "yes" : "no");
-        if (!receiver->isThermal()) {
+        if (!receiver->isThermal() && !isScorpionPipReceiver(receiver)) {
             _recording = active;
             if (!active) {
                 _subtitleWriter->stopCapturingTelemetry();
@@ -940,14 +995,14 @@ void VideoManager::_initVideoReceiver(VideoReceiver *receiver, QQuickWindow *win
 
     (void) connect(receiver, &VideoReceiver::recordingStarted, this, [this, receiver](const QString &filename) {
         qCDebug(VideoManagerLog) << "Video" << receiver->name() << "recording started";
-        if (!receiver->isThermal()) {
+        if (!receiver->isThermal() && !isScorpionPipReceiver(receiver)) {
             _subtitleWriter->startCapturingTelemetry(filename, videoSize());
         }
     });
 
     (void) connect(receiver, &VideoReceiver::videoSizeChanged, this, [this, receiver](QSize size) {
         qCDebug(VideoManagerLog) << "Video" << receiver->name() << "resized. New resolution:" << size.width() << "x" << size.height();
-        if (!receiver->isThermal()) {
+        if (!receiver->isThermal() && !isScorpionPipReceiver(receiver)) {
             _videoSize = size;
             emit videoSizeChanged();
             emit aspectRatioChanged();
@@ -973,6 +1028,23 @@ void VideoManager::_initVideoReceiver(VideoReceiver *receiver, QQuickWindow *win
 
     if (hasVideo()) {
         _startReceiver(receiver);
+    }
+}
+
+void VideoManager::setScorpionPipEnabled(bool enabled)
+{
+    if (_scorpionPipEnabled == enabled) {
+        return;
+    }
+    _scorpionPipEnabled = enabled;
+    if (!enabled && _scorpionPipAvailable) {
+        _scorpionPipAvailable = false;
+        emit scorpionPipAvailableChanged();
+    }
+    for (VideoReceiver *receiver : std::as_const(_videoReceivers)) {
+        if (isScorpionPipReceiver(receiver) && _updateSettings(receiver)) {
+            _restartVideo(receiver);
+        }
     }
 }
 

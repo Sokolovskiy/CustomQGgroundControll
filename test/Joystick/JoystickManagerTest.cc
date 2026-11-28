@@ -7,6 +7,7 @@
 #include <QtTest/QSignalSpy>
 
 #include "JoystickManager.h"
+#include "JoystickManagerSettings.h"
 #include "JoystickSDL.h"
 #include "MockJoystick.h"
 #include "SDLJoystick.h"
@@ -182,7 +183,6 @@ void JoystickManagerTest::_instanceIdReuseNameMismatchManagerTest()
     SDLJoystick::pumpEvents();
     SDLJoystick::updateJoysticks();
     SDLJoystick::updateGamepads();
-    manager->_checkForAddedOrRemovedJoysticks();
 
     auto replacement = std::unique_ptr<MockJoystick>(MockJoystick::create(newName, 6, 16, 1));
     QVERIFY(replacement->isValid());
@@ -210,6 +210,32 @@ void JoystickManagerTest::_instanceIdReuseNameMismatchManagerTest()
 //-----------------------------------------------------------------------------
 // Active Joystick Selection Tests
 //-----------------------------------------------------------------------------
+void JoystickManagerTest::_sameNameReplacementManagerTest()
+{
+    auto* manager = JoystickManager::instance();
+    const QString name = QStringLiteral("Manager same-name USB");
+    _mockJoystick1.reset(MockJoystick::create(name, 5, 7, 0));
+    QVERIFY(_mockJoystick1);
+    QVERIFY(_waitForJoystickNames(manager, {name}));
+    manager->_joystickManagerSettings->activeJoystickName()->setRawValue(name);
+    QPointer<Joystick> old = manager->activeJoystick();
+    QVERIFY(old);
+    old->setButtonAction(2, QStringLiteral("Altitude Hold"));
+
+    _mockJoystick1.reset();
+    _mockJoystick2.reset(MockJoystick::create(name, 6, 8, 0));
+    QVERIFY(_mockJoystick2);
+    _refreshJoysticks(manager);
+    Joystick* current = manager->activeJoystick();
+    QVERIFY(current);
+    QVERIFY(current != old.data());
+    QCOMPARE(current, manager->joystickByName(name));
+    QCOMPARE(current->name(), name);
+    QCOMPARE(current->axisCount(), 6);
+    QCOMPARE(current->getButtonAction(2), QStringLiteral("Altitude Hold"));
+    QVERIFY(UnitTest::waitForDeleted(old, TestTimeout::shortMs(), QStringLiteral("replaced active USB")));
+}
+
 void JoystickManagerTest::_setActiveJoystickTest()
 {
     // _multiJoysticksSupported() probes whether the SDL backend can expose two

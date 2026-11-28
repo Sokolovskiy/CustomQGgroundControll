@@ -344,6 +344,94 @@ Item {
             }
         }
 
+        Rectangle {
+            id: disarmCountdown
+            objectName: "herelinkOsdDisarmCountdown"
+            property int previewRemainingMs: 0
+            readonly property int remainingMs: root.d.disarmRemainingMs > 0
+                ? root.d.disarmRemainingMs : previewRemainingMs
+            readonly property string status: root.d.disarmStatus ?? ""
+            readonly property bool previewAllowed: !root.d.armed && !(root.d.disarmRemainingMs > 0)
+                && status.length === 0
+            property double previewStartedAt: 0
+            readonly property int durationMs: 3000
+            readonly property color progressColor: status.length > 0 || remainingMs < 1000 ? root.danger : root.accent
+            readonly property real remainingSeconds: remainingMs < 1000
+                ? Math.floor(remainingMs / 100) / 10 : Math.ceil(remainingMs / 100) / 10
+
+            // Keep the live countdown visible even when the regular OSD is hidden.
+            parent: root
+            z: 1
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: (banner.visible ? banner.y : root.height - root.bottomReserve - 12.5 * root.unit)
+                - height - root.gap
+            width: 230 * root.unit
+            height: 43 * root.unit
+            radius: 6 * root.unit
+            color: "#dd131e2c"
+            visible: remainingMs > 0 || status.length > 0
+            onPreviewAllowedChanged: {
+                if (!previewAllowed) {
+                    previewTimer.stop()
+                    previewRemainingMs = 0
+                }
+            }
+            onVisibleChanged: {
+                if (!visible) {
+                    previewTimer.stop()
+                    previewRemainingMs = 0
+                }
+            }
+
+            // The preview never changes the backend countdown or sends a command.
+            function preview() {
+                previewStartedAt = Date.now()
+                previewRemainingMs = durationMs
+                previewTimer.restart()
+            }
+
+            Timer {
+                id: previewTimer
+                interval: 33
+                repeat: true
+                onTriggered: {
+                    disarmCountdown.previewRemainingMs = Math.max(0,
+                        disarmCountdown.durationMs - (Date.now() - disarmCountdown.previewStartedAt))
+                    if (disarmCountdown.previewRemainingMs === 0) { stop() }
+                }
+            }
+
+            Readout {
+                x: 10 * root.unit; y: 5 * root.unit
+                width: parent.width / 2; height: 22 * root.unit
+                text: "DISARM"
+                font.pixelSize: 16 * root.unit
+            }
+            Readout {
+                objectName: "herelinkOsdDisarmRemaining"
+                x: parent.width / 2; y: 5 * root.unit
+                width: parent.width / 2 - 10 * root.unit; height: 22 * root.unit
+                text: disarmCountdown.status.length > 0 ? disarmCountdown.status
+                    : qsTr("%1 s").arg(disarmCountdown.remainingSeconds.toFixed(1))
+                color: disarmCountdown.progressColor
+                font.pixelSize: 16 * root.unit
+                horizontalAlignment: Text.AlignRight
+            }
+            Rectangle {
+                x: 10 * root.unit; y: parent.height - 10 * root.unit
+                width: parent.width - 20 * root.unit; height: 3 * root.unit
+                radius: height / 2
+                color: "#40ffffff"
+                Rectangle {
+                    objectName: "herelinkOsdDisarmProgress"
+                    width: parent.width * (1 - disarmCountdown.remainingMs / disarmCountdown.durationMs)
+                    height: parent.height
+                    radius: parent.radius
+                    color: disarmCountdown.progressColor
+                }
+            }
+        }
+
         Image {
             readonly property real scaleUnit: Math.max(0.55, Math.min(root.width / 1713, root.height / 918))
             anchors.centerIn: parent
@@ -375,6 +463,11 @@ Item {
         Keys.onMenuPressed: osdOptions.popup()
         Menu {
             id: osdOptions
+            MenuItem {
+                text: qsTr("Preview DISARM countdown (3 s)")
+                enabled: root.backend.overlayVisible && !root.d.armed && disarmCountdown.remainingMs === 0
+                onTriggered: disarmCountdown.preview()
+            }
             MenuItem {
                 text: qsTr("Herelink HDMI")
                 enabled: root.backend.cameraProfileAvailable && root.backend.data.connected && !root.backend.data.armed

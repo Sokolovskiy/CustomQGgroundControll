@@ -26,6 +26,7 @@ private slots:
     void _joystickAddedSignalTest();
     void _joystickRemovedSignalTest();
     void _instanceIdReuseNameMismatchManagerTest();
+    void _sameNameReplacementManagerTest();
 
     // Active joystick selection
     void _setActiveJoystickTest();

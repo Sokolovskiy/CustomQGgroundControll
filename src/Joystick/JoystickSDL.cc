@@ -1,14 +1,14 @@
 #include "JoystickSDL.h"
-#include "JoystickManager.h"
-#include "SDLJoystick.h"
-#include "QGCLoggingCategory.h"
 
 #include <QtCore/QMetaObject>
 #include <QtCore/QThread>
-
+#include <SDL3/SDL.h>
+#include <algorithm>
 #include <array>
 
-#include <SDL3/SDL.h>
+#include "JoystickManager.h"
+#include "QGCLoggingCategory.h"
+#include "SDLJoystick.h"
 
 // This is used for testing manual control extensions which require additional axes but all you have is a gamepad/joystick with limited axes.
 // Only available on debug builds.
@@ -103,15 +103,19 @@ static bool sdlEventWatcher(void *userdata, SDL_Event *event)
     return true;
 }
 
-JoystickSDL::JoystickSDL(const QString &name, const QList<int> &gamepadAxes, const QList<int> &nonGamepadAxes, int buttonCount, int hatCount, int instanceId, QObject *parent)
-    : Joystick(name, gamepadAxes.length() + nonGamepadAxes.length()
+JoystickSDL::JoystickSDL(const QString& name, const QList<int>& gamepadAxes, const QList<int>& nonGamepadAxes,
+                         int buttonCount, int hatCount, int instanceId, QObject* parent)
+    : Joystick(name,
+               gamepadAxes.length() + nonGamepadAxes.length()
 #ifdef TEST_WITH_VIRTUAL_AXES
-               + 2  // Add 2 virtual axes for testing
+                   + 2  // Add 2 virtual axes for testing
 #endif
-               , buttonCount, hatCount, parent)
-    , _gamepadAxes(gamepadAxes)
-    , _nonGamepadAxes(nonGamepadAxes)
-    , _instanceId(instanceId)
+               ,
+               buttonCount, hatCount, parent),
+      _gamepadAxes(gamepadAxes),
+      _nonGamepadAxes(nonGamepadAxes),
+      _instanceId(instanceId),
+      _deviceName(name)
 {
     qCDebug(JoystickSDLLog) << this;
 }
@@ -177,7 +181,10 @@ void JoystickSDL::shutdown(bool deleteDiscoveryCache)
 
 QMap<QString, Joystick*> JoystickSDL::discover()
 {
-    Q_ASSERT(QThread::isMainThread());
+    if (!QThread::isMainThread()) {
+        qCWarning(JoystickSDLLog) << "Joystick discovery requires the main thread";
+        return {};
+    }
 
     QMap<QString, Joystick*> current;
 
@@ -216,7 +223,7 @@ QMap<QString, Joystick*> JoystickSDL::discover()
         for (auto it = s_discoveryCache.begin(); it != s_discoveryCache.end(); ++it) {
             auto *cachedJs = static_cast<JoystickSDL*>(it.value());
             if (static_cast<SDL_JoystickID>(cachedJs->instanceId()) == jid) {
-                if (cachedJs->name() == baseName) {
+                if (cachedJs->_deviceName == baseName) {
                     name = it.key();
                     current[name] = cachedJs;
                     s_discoveryCache.erase(it);
@@ -234,18 +241,13 @@ QMap<QString, Joystick*> JoystickSDL::discover()
             continue;
         }
 
-        // Check cache by name (for joysticks that were disconnected and reconnected)
-        if (s_discoveryCache.contains(name) && !current.contains(name)) {
-            current[name] = s_discoveryCache[name];
-            auto *js = static_cast<JoystickSDL*>(current[name]);
-            js->setInstanceId(jid);
-            (void) s_discoveryCache.remove(name);
-            continue;
-        }
-
         // Handle duplicate names by appending a number
         int duplicateIndex = 2;
-        while (current.contains(name) || s_discoveryCache.contains(name)) {
+        while (current.contains(name) ||
+               (s_discoveryCache.contains(name) &&
+                std::find(ids, ids + count,
+                          static_cast<SDL_JoystickID>(
+                              static_cast<JoystickSDL*>(s_discoveryCache[name])->instanceId())) != ids + count)) {
             name = QStringLiteral("%1 #%2").arg(baseName).arg(duplicateIndex++);
         }
 
@@ -306,12 +308,10 @@ QMap<QString, Joystick*> JoystickSDL::discover()
 
         qCDebug(JoystickSDLLog) << "Creating JoystickSDL for" << name << "jid:" << jid;
 
-        current[name] = new JoystickSDL(name,
-                                        gamepadAxes,
-                                        nonGamepadAxes,
-                                        qMax(0, buttonCount),
-                                        qMax(0, hatCount),
-                                        jid);
+        auto* joystick =
+            new JoystickSDL(name, gamepadAxes, nonGamepadAxes, qMax(0, buttonCount), qMax(0, hatCount), jid);
+        joystick->_deviceName = baseName;
+        current[name] = joystick;
     }
 
     SDL_free(ids);

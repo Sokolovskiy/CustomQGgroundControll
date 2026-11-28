@@ -41,6 +41,8 @@ if(QGC_BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/test/HerelinkFlyViewTest.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/test/HerelinkOsdTest.cc"
         "${CMAKE_CURRENT_SOURCE_DIR}/test/HerelinkOsdTest.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/HerelinkJoystickTest.cc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/HerelinkJoystickTest.h"
         CACHE INTERNAL "Custom sources" FORCE
     )
     function(herelink_add_ui_test)
@@ -54,6 +56,7 @@ if(QGC_BUILD_TESTING)
             add_qgc_test(HerelinkFlyViewTest LABELS Integration)
         endif()
         add_qgc_test(HerelinkOsdTest LABELS Unit)
+        add_qgc_test(HerelinkJoystickTest LABELS "Unit;Joystick")
     endfunction()
     cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL herelink_add_ui_test)
 endif()

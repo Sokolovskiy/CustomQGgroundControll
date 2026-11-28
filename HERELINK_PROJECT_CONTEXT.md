@@ -19,11 +19,56 @@ Snapshot from 2026-11-07. This document records the project's technical decision
 
 The original baseline passed 191 of 197 Unit tests. The six known failures are `GeoTagControllerTest`, `BluetoothWorkerTest`, `QGCArchiveModelTest`, `QGCCompressionTest`, `JsonResourceAuditTest`, and `PlatformTest`. The initial custom build reproduced those six. This is historical evidence, so report any later verification separately.
 
+## Android handheld port (2026-11-16)
+
+- The user confirmed Android **7.1.2** and requested the custom interface with **stock Herelink QGC
+  controls**. Keep the Windows control customizations out of the handheld build.
+- Sources and instructions are in [custom/android-herelink](custom/android-herelink/README.md).
+  Preparation uses a separate CubePilot checkout under `.cache/herelink-android-source`, pinned to
+  `eff16bdf347b8aba6bd7cdbb2e25a306adf96ac7` (`v5.0.8.5-herelink`). The Android toolchain lives
+  under `.cache/herelink-toolchain`: Qt 6.6.3, NDK r25b, JDK 17, API 25 runtime, ARM64.
+- Run `./custom/android-herelink/build.ps1` from the main repository root. The intended signed
+  development artifact is `build-herelink-android/FatumHerelink-android7-arm64.apk`; its package ID
+  is `org.fatum.herelink.gcs`. The local development signing key stays in the toolchain cache.
+- The OSD reads native Facts and passive telemetry. Native connection, buttons, modes, camera
+  switching, arming, confirmations and failsafes stay in the CubePilot plugin. Camera tilt and
+  SD-card callsign have no native source in this port and remain unavailable.
+- The first device launch failed on unresolved sibling QML types after resource interception.
+  The layer now explicitly imports `qrc:/Herelink`, and the upstream Quit handler guards a missing
+  root window. A regression test exercises the intercepted stock URL. The corrected APK was
+  installed over ADB and opened the main window on the Android 7.1.2 Optimus handheld.
+- Android OSD panels anchor to viewport edges rather than native corner insets. In video view,
+  the stock bottom-right compass/telemetry are hidden and native action buttons sit below the
+  OSD mode badge. The PiP/map toggle sits above the lower-left OSD. This layout was installed
+  and visually verified over ADB; the map retains its stock instruments and control actions are unchanged.
+- Physical controls and video still require a handheld bench check. Run one
+  GCS app at a time because the native connection ports are shared. See the port guide for the
+  exact build and validation status.
+- The Android attitude model now includes yaw relative to its initial valid heading, resets
+  that reference after attitude loss/vehicle changes, and uses the same frame for motion arrows.
+  Native Facts remain the attitude source; no flight-control behavior changes are involved.
+  The user confirmed physical yaw tracking on the connected aircraft after the update. An
+  independent pre-update SIGABRT/invalid-free crash was captured in `QObject::event`; its cause
+  remains unisolated and is recorded in the Android port guide.
+
 ## Hardware and controls
+
+- The Windows distribution includes the supplied TX16S EdgeTX 2.12.4 template
+  at `TEMPLATES/2.Personal/HERELINK.yml`. Create models through New Model →
+  Personal rather than copying numbered files into `MODELS`. The standalone
+  archive is tracked in `custom/artifacts/tx16s`; the supplied YAML bytes and
+  control mappings are preserved. GCS calibration remains specific to the PC.
+- On 2026-11-28 the user supplied a replacement `E:/TEMPLATES/2.Personal/HERELINK.yml`.
+  The template archive preserves its bytes exactly (YAML SHA-256
+  `9b511b496e4c2add7a9a56bebd2a38a7b35b80f2b635e332ab390aac5bf162a8`).
+  CH5 now uses SH / DISARM, CH12's mixer source is NONE, and USB Pitch inversion
+  is off. GCS buttons 0/1 remain the CH5 input. Verify Pitch direction when using
+  this template; the Windows installer and FC parameters do not change for this update.
 
 The Windows PC normally uses two Herelink units in AirUnit-to-AirUnit mode, an ArduPilot flight controller, and a RadioMaster TX16S over USB/SDL. The handheld Herelink controller is a separate setup and can send SBUS to the FC. The official application verified telemetry, video and joystick integration. The PC setup observed in diagnostic logs uses UDP port `14552` and GroundUnit peer `192.168.144.11`. Keep those values scoped to the observed setup.
 
-- ARM and DISARM are manual in the Fly View readiness panel. CH5 is unassigned for PC control. The earlier CH5 interlock request was superseded. Keep standard pre-arm and emergency behavior.
+- ARM and normal DISARM remain in the Fly View readiness panel. The user authorized emergency force-disarm on transmitter CH5 for Windows + TX16S on 2026-11-28. The supplied EdgeTX USB profile represents CH5 as buttons 0 (low) and 1 (high), not a PWM axis or FC RC5 telemetry. Only the known five-axis/seven-button TX16SMK3 profile is recognized. While ARMED, a fresh low position followed by high held for 3 seconds sends one `MAV_CMD_COMPONENT_ARM_DISARM` with params `0, 21196`. Exact PWM 1900 is unavailable through this quantized USB mapping. No FC parameters or radio template are changed.
+- The compact Windows DISARM countdown is amber, with remaining time and progress red below 1 second, and stays visible if regular OSD is hidden. It resets on release, invalid/stale input (300 ms), joystick/vehicle/link changes and armed-state transitions. Startup high cannot trigger it; every attempt requires a fresh low position. The command uses the existing queue without force-command repeats; `SENT`, `DENIED`, `NO ACK`, `NO STATE` and `BUSY` distinguish results, while the actual DISARMED badge still follows telemetry. The OSD context menu retains a separate 3-second visual preview which never sends commands. On 2026-11-28, the user restored CH5 USB buttons 0/1, disabled Additional Axis 1, completed calibration, and confirmed that CH5 disarm works. No broader flight verification is implied.
 - The Fly View mode menu offers Altitude Hold, Position Hold, Land and RTL when available from the firmware. The main toolstrip hides Takeoff and Return/RTL and retains Land where eligible. These are UI restrictions. Standard vehicle capabilities still exist.
 - The existing PC TX16S setup showed joystick actions 2/3/4 for Altitude Hold/Position Hold/Land and 5/6 for camera off/on. Read the live joystick configuration for the actual mapping. On the handheld Herelink, the user observed RC6 at 1000 for Position Hold and 2000 for Altitude Hold. Keep the handheld channel semantics distinct from PC joystick action labels.
 - The user asked to explore an RC/PWM profile for CH5–CH10, then rolled the migration back after regressions. Do not treat the proposed RC11 startup override or CH7/CH9 fallback as active behavior. CH6 startup synchronization with automatic LAND blocked was requested, but the [proposal](custom/MODE_SYNC_PROPOSAL.md) and the [custom build guide](custom/README.md) describe it as unimplemented. Verify the targeted code before relying on that protection.

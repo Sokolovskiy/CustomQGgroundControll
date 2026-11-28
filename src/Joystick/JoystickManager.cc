@@ -111,7 +111,8 @@ void JoystickManager::_checkForAddedOrRemovedJoysticks()
         }
     }
 
-    if (_activeJoystick && (activeJoystickName.isEmpty() || !newJoystickMap.contains(activeJoystickName))) {
+    if (_activeJoystick &&
+        (activeJoystickName.isEmpty() || newJoystickMap.value(activeJoystickName) != _activeJoystick)) {
         qCInfo(JoystickManagerLog) << "Active joystick removed:" << (activeJoystickName.isEmpty() ? QStringLiteral("<stale>") : activeJoystickName);
         _setActiveJoystick(nullptr);
     }
@@ -119,7 +120,7 @@ void JoystickManager::_checkForAddedOrRemovedJoysticks()
     // Check to see if our current mapping contains any joysticks that are not in the new mapping
     // If so, those joysticks have been unplugged, and need to be cleaned up
     for (QMap<QString, Joystick*>::key_value_iterator it = _name2JoystickMap.keyValueBegin(); it != _name2JoystickMap.keyValueEnd(); ++it) {
-        if (!newJoystickMap.contains(it->first)) {
+        if (newJoystickMap.value(it->first) != it->second) {
             auto key = it->first;
             auto joystick = it->second;
             qCInfo(JoystickManagerLog) << "Joystick disconnected, releasing:" << key;

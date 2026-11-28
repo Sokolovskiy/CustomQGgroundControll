@@ -160,6 +160,7 @@ Joystick::Joystick(const QString &name, int axisCount, int buttonCount, int hatC
     _buildAvailableButtonsActionList(MultiVehicleManager::instance()->activeVehicle());
 
     _loadFromSettingsIntoCalibrationData();
+    QGCCorePlugin::instance()->initializeJoystickSettings(this);
 }
 
 Joystick::~Joystick()
@@ -784,10 +785,23 @@ void Joystick::_handleButtons()
             return;
         }
 
+        quint64 pressedButtons = 0;
+        for (int index = 0; index < qMin(_totalButtonCount, 64); ++index) {
+            if (_buttonEventStates[index] == ButtonEventDownTransition
+                || _buttonEventStates[index] == ButtonEventRepeat) {
+                pressedButtons |= quint64{1} << index;
+            }
+        }
+        emit buttonValues(pressedButtons);
+
         //-- Process button press/release
         const int buttonDelay = static_cast<int>(1000.0 / _joystickSettings.buttonFrequencyHz()->rawValue().toDouble());
         QSet<QString> executedActions;
         for (int buttonIndex = 0; buttonIndex < _totalButtonCount; buttonIndex++) {
+            if (_buttonEventStates[buttonIndex] == ButtonEventDownTransition) {
+                qCDebug(JoystickLog) << "Input device/button/action:" << name() << buttonIndex
+                                     << getButtonAction(buttonIndex);
+            }
             if (!_assignedButtonActions[buttonIndex]) {
                 continue;
             }
@@ -1535,6 +1549,7 @@ void Joystick::setButtonAction(int button, const QString& actionName)
         settings.setValue(actionNameKey, _buttonActionNone);
         settings.setValue(repeatKey, false);
     } else {
+        _addAvailableButtonActionIfMissing(actionName);
         if (!_assignedButtonActions[button]) {
             _assignedButtonActions[button] = new AssignedButtonAction(actionName, false /* repeat */);
         } else {
@@ -1642,14 +1657,15 @@ void Joystick::_executeButtonAction(const QString &action, const ButtonEvent_t b
         return;
     }
 
+    if (QGCCorePlugin::instance()->handleJoystickMavlinkAction(vehicle, action)) {
+        return;
+    }
+
     // MAVLink actions
     emit unknownAction(action);
     for (int i = 0; i < _mavlinkActionManager->actions()->count(); i++) {
         MavlinkAction *const mavlinkAction = _mavlinkActionManager->actions()->value<MavlinkAction*>(i);
         if (action == mavlinkAction->label()) {
-            if (QGCCorePlugin::instance()->handleJoystickMavlinkAction(vehicle, action)) {
-                return;
-            }
             qCDebug(JoystickLog) << "Button Action: Sending MAVLink action" << action;
             mavlinkAction->sendTo(vehicle);
             return;
@@ -1817,7 +1833,9 @@ void Joystick::_buildAvailableButtonsActionList(Vehicle *vehicle)
 
     for (int i = 0; i < _mavlinkActionManager->actions()->count(); i++) {
         const MavlinkAction *const mavlinkAction = _mavlinkActionManager->actions()->value<const MavlinkAction*>(i);
-        _availableButtonActions->append(new AvailableButtonAction(mavlinkAction->label(), nullptr));
+        if (_findAvailableButtonActionIndex(mavlinkAction->label()) == -1) {
+            _availableButtonActions->append(new AvailableButtonAction(mavlinkAction->label(), nullptr));
+        }
     }
 
     // Always include actions currently assigned to buttons even if they are not otherwise

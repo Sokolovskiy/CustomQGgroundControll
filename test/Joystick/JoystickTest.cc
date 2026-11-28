@@ -92,6 +92,64 @@ void JoystickTest::_multipleJoysticksTest()
 //-----------------------------------------------------------------------------
 // Identity Tests
 //-----------------------------------------------------------------------------
+void JoystickTest::_duplicateNameRediscoveryTest()
+{
+    const QString name = QStringLiteral("Duplicate USB Controller");
+    auto first = std::unique_ptr<MockJoystick>(MockJoystick::create(name, 5, 7, 0));
+    auto second = std::unique_ptr<MockJoystick>(MockJoystick::create(name, 5, 7, 0));
+    QVERIFY(first && second);
+    _pumpEvents();
+    _discoveredJoysticks = JoystickSDL::discover();
+    QPointer<JoystickSDL> firstDiscovered = _findJoystickByInstanceId(first->instanceId());
+    QPointer<JoystickSDL> secondDiscovered = _findJoystickByInstanceId(second->instanceId());
+    QVERIFY(firstDiscovered && secondDiscovered);
+    QVERIFY(firstDiscovered != secondDiscovered);
+    const QString secondName = secondDiscovered->name();
+    QVERIFY(secondName.endsWith(QStringLiteral(" #2")));
+    secondDiscovered->setButtonAction(2, QStringLiteral("Land"));
+
+    for (int scan = 0; scan < 3; ++scan) {
+        _discoveredJoysticks = JoystickSDL::discover();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QVERIFY(firstDiscovered && secondDiscovered);
+        QCOMPARE(_findJoystickByInstanceId(second->instanceId()), secondDiscovered.data());
+        QCOMPARE(secondDiscovered->getButtonAction(2), QStringLiteral("Land"));
+    }
+    first.reset();
+    _pumpEvents();
+    _discoveredJoysticks = JoystickSDL::discover();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QVERIFY(secondDiscovered);
+    QCOMPARE(secondDiscovered->name(), secondName);
+    QCOMPARE(secondDiscovered->getButtonAction(2), QStringLiteral("Land"));
+}
+
+void JoystickTest::_sameNameReplacementTest()
+{
+    const QString name = QStringLiteral("Replacement USB Controller");
+    auto original = std::unique_ptr<MockJoystick>(MockJoystick::create(name, 5, 7, 0));
+    QVERIFY(original);
+    _pumpEvents();
+    _discoveredJoysticks = JoystickSDL::discover();
+    QPointer<JoystickSDL> old = _findJoystickByInstanceId(original->instanceId());
+    QVERIFY(old);
+    old->setButtonAction(3, QStringLiteral("Position Hold"));
+    original.reset();
+    auto replacement = std::unique_ptr<MockJoystick>(MockJoystick::create(name, 6, 8, 0));
+    QVERIFY(replacement);
+    _pumpEvents();
+    // No intermediate scan: the old name still exists in the cache.
+    _discoveredJoysticks = JoystickSDL::discover();
+    auto* current = _findJoystickByInstanceId(replacement->instanceId());
+    QVERIFY(current);
+    QVERIFY(current != old.data());
+    QCOMPARE(current->name(), name);
+    QCOMPARE(current->axisCount(), 6);
+    QCOMPARE(current->buttonCount(), 8);
+    QCOMPARE(current->getButtonAction(3), QStringLiteral("Position Hold"));
+    QVERIFY(UnitTest::waitForDeleted(old, TestTimeout::shortMs(), QStringLiteral("replaced USB instance")));
+}
+
 void JoystickTest::_joystickIdentityTest()
 {
     _mockJoystick =
@@ -528,13 +586,15 @@ void JoystickTest::_instanceIdReuseNameMismatchTest()
 
     _mockJoystick.reset();
     _pumpEvents();
-    _discoveredJoysticks = JoystickSDL::discover();
 
     auto replacement =
         std::unique_ptr<MockJoystick>(MockJoystick::create(QStringLiteral("Replacement Controller"), 4, 8, 1));
     QVERIFY(replacement->isValid());
 
-    // Force an instance-id collision to exercise stale-cache eviction path.
+    // Keep the object cached until injection; a removal scan schedules its deletion.
+    // SDL can retain a virtual gamepad's mapped name, so inject the stale identity explicitly.
+    const QString replacementName = SDLJoystick::getNameForInstanceId(replacement->instanceId());
+    cachedJoystick->_deviceName = QStringLiteral("Stale hardware identity");
     cachedJoystick->setInstanceId(replacement->instanceId());
 
     _mockJoystick = std::move(replacement);
@@ -543,7 +603,7 @@ void JoystickTest::_instanceIdReuseNameMismatchTest()
 
     JoystickSDL* discovered = _findJoystickByInstanceId(_mockJoystick->instanceId());
     QVERIFY(discovered != nullptr);
-    QCOMPARE(discovered->name(), QStringLiteral("Replacement Controller"));
+    QCOMPARE(discovered->name(), replacementName);
     QVERIFY(discovered != cachedJoystick);
 
     QVERIFY(UnitTest::waitForDeleted(staleGuard, TestTimeout::shortMs(),
