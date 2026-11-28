@@ -113,6 +113,15 @@ camera pitch paths are unchanged. This UI change neither adds nor removes
 joystick ARM/DISARM mappings; remove any previously configured transmitter
 ARM/DISARM button assignments manually in Joystick settings when migrating.
 
+As of 2026-11-28, the Windows TX16SMK3 profile additionally supports a separate
+CH5 emergency force-disarm hold. The supplied USB mapping uses physical buttons
+0/1 for CH5 low/high. While ARMED, select low, then hold high for 3 seconds;
+the compact OSD countdown turns red below 1 second. Release, stale input or a
+vehicle/link/joystick change cancels the hold. Every attempt needs a fresh low
+position; the force command is not automatically repeated. Keep button actions
+0/1 set to No Action. This is not the historical CH5 arming interlock and does
+not change FC parameters. See [the user guide](USER_GUIDE.uk.md#аварійний-disarm-на-ch5).
+
 Takeoff and RTL remain available to the underlying vehicle/MAVLink APIs and
 may appear in other standard contexts. Only primary Fly View entries change.
 

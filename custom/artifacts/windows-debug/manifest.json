@@ -1,23 +1,25 @@
 {
   "artifact": "HerelinkGCS.exe",
   "configuration": "Windows x64 Debug",
-  "sizeBytes": 114696704,
-  "sha256": "6b5b31897f38091ccc72d76a3f072f0a65f66dff6898bbeac42d14f336d6ef43",
-  "builtFileModifiedUtc": "2026-11-20T16:02:01.8593775Z",
-  "recordedDate": "2026-11-22",
-  "sourceBaseCommit": "6c71ed725a0a7aad9e207c85e7d46c6d5a41e320",
+  "sizeBytes": 114758656,
+  "sha256": "d4dbc7af7f70a66d825d96208c8d540c2f17313fc705683dea9140f82923a1ab",
+  "builtFileModifiedUtc": "2026-11-28T10:33:23.4067532Z",
+  "recordedDate": "2026-11-28",
+  "sourceBaseCommit": "cfce2678c961529b42ed39a8007c4b6d47b2981a",
+  "sourceChanges": "CH5 emergency disarm and built-in camera actions, included in the same commit as this snapshot",
   "toolchain": {
-    "msvc": "14.44.35207",
     "qt": "6.11.1 msvc2022_64",
+    "msvc": "14.44.35207",
     "gstreamer": "1.28.4"
   },
   "launchFromRepositoryRoot": "custom\\build-debug.cmd run",
   "validation": {
-    "date": "2026-11-20",
-    "focusedSuites": "HerelinkJoystickTest, JoystickTest, JoystickManagerTest: 3/3 passed",
-    "unitSuites": "191/198 passed; see custom/RC_CONTROL_DIAGNOSIS.md",
-    "lint": "Not fully passing; existing formatting/CMake style and clang-tidy build-directory issues",
-    "startup": "Started successfully through custom/build-debug.cmd run on 2026-11-20",
-    "hardware": "Not verified by automated tests"
+    "focusedSuites": "Not run for this change at user request",
+    "date": "2026-11-28",
+    "build": "custom/build-debug.cmd succeeded",
+    "startup": "Updated application started successfully",
+    "hardware": "User confirmed CH5 disarm after restoring USB buttons 0/1 and completing calibration",
+    "unitSuites": "Not run for this change; historical baseline in custom/RC_CONTROL_DIAGNOSIS.md",
+    "lint": "Changed QML checked; C++ null-safety and translation checks passed; full lint not run"
   }
 }

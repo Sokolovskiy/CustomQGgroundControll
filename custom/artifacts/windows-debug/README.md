@@ -1,7 +1,8 @@
 # Saved Windows Debug executable
 
-`HerelinkGCS.exe` is the tested Windows x64 Debug executable from the RC-control
-fix, stored with Git LFS. Its SHA-256, build timestamp and validation results
+`HerelinkGCS.exe` is the Windows x64 Debug executable with the CH5 emergency
+disarm countdown, stored with Git LFS. The user confirmed CH5 operation on
+2026-11-28. Its SHA-256, build timestamp and validation results
 are recorded in [manifest.json](manifest.json). The source changes are in the
 same commit. This snapshot was successfully launched through the existing
 Debug launcher on 2026-11-20.

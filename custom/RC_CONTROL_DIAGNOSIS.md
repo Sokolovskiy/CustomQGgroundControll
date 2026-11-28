@@ -29,7 +29,8 @@ get fresh objects, and manager selection follows object replacement.
 | Function | USB / UI input | Outgoing MAVLink |
 | --- | --- | --- |
 | Sticks | Calibrated four stick axes | `MANUAL_CONTROL`; auxiliary override ignores RC1–4 |
-| ARM/DISARM | Existing readiness UI | Existing arm command; RC5 remains unassigned |
+| ARM/normal DISARM | Existing readiness UI | Existing arm command |
+| Emergency force-disarm (transmitter CH5) | Physical USB buttons **0/1** (low/high), independent of button actions; fresh low then high held 3 seconds while ARMED | One `MAV_CMD_COMPONENT_ARM_DISARM`, params `0, 21196`; no RC5 override |
 | Modes (transmitter CH6 function) | Buttons **2/3/4**, zero based in both UI and settings | Firmware flight-mode action, normally `MAV_CMD_DO_SET_MODE`; no RC6 PWM |
 | Cameras (transmitter CH8 function) | Buttons **5/6** | Verba: `MAV_CMD_DO_SET_RELAY`, Relay2/index 1, OFF/ON; Scorpion HDMI profile: `MAV_CMD_VIDEO_START_STREAMING`, input 0/1 |
 | Tilt (transmitter CH11 label) | USB axis **4**, Additional Axis **6** | `RC_CHANNELS_OVERRIDE.chan10_raw`, MAVLink RC**10**, 1000–2000 |
@@ -42,13 +43,14 @@ An unchanged `RC_CHANNELS.chan6_raw` or `chan8_raw` is therefore expected with
 the working command-based profile. `RC_CHANNELS` is FC telemetry, not an echo
 of all GCS commands. Current FC parameter values require a separate read-only
 bench inspection; this change performs no parameter writes and introduces no
-RC5 arming behavior.
+RC5 arming behavior. The later user-authorized CH5 emergency disarm is handled from
+physical USB button samples; it does not use FC RC5 telemetry or send RC5 override.
 
-The saved `MavlinkActions/joystickActionsFile` is `HerelinkCameraActions.json`.
-The existing file under the configured `savePath/MavlinkActions` was checked:
-both camera labels use command 181 (`MAV_CMD_DO_SET_RELAY`), param1 = 1,
-param2 = 0/1. This file remains required by the existing camera dispatch path,
-including the custom HDMI interception. It was present and was not modified.
+Camera Relay OFF/ON are built-in joystick actions and require no MAVLink actions
+JSON. The custom handler runs before JSON lookup and selects the board's camera
+path: Relay2/index 1 by default, or Herelink HDMI inputs 0/1 when enabled.
+Existing JSON entries with the same labels do not create duplicate choices or
+send an additional command. Other JSON actions keep their existing behavior.
 
 ## Recovery and persistence
 

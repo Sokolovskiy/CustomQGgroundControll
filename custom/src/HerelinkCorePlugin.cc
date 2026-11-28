@@ -131,6 +131,11 @@ void HerelinkCorePlugin::initializeJoystickSettings(Joystick* joystick)
     settings.sync();
 }
 
+QList<QGCCorePlugin::JoystickAction> HerelinkCorePlugin::joystickActions()
+{
+    return {{QStringLiteral("Camera Relay OFF"), false}, {QStringLiteral("Camera Relay ON"), false}};
+}
+
 bool HerelinkCorePlugin::handleJoystickMavlinkAction(Vehicle *vehicle, const QString &label)
 {
     if (label == QStringLiteral("Camera Relay OFF")) {

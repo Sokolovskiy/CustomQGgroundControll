@@ -372,6 +372,7 @@ signals:
     void vehicleJoystickData(float roll, float pitch, float yaw, float throttle, uint16_t buttonsLow, uint16_t buttonsHigh, float gimbalPitch, float gimbalYaw);
     void rawChannelValuesChanged(QVector<int> channelValues); ///< Signalled during PollingForConfiguration
     void rawButtonPressedChanged(int index, bool pressed); ///< Signalled during PollingForConfiguration
+    void buttonValues(quint64 pressedButtons); ///< Fresh physical button sample during calibrated vehicle polling.
 
     // Sensor event signals (for event-driven updates)
     void gyroscopeDataUpdated(const QVector3D &data);

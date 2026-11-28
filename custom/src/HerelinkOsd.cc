@@ -5,6 +5,7 @@
 #include <QtCore/QSettings>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QtMath>
 #include <QtGui/QVector3D>
 #include "FTPManager.h"
@@ -34,6 +35,9 @@ constexpr qint64 kStartupCameraSelectionTimeoutMs = 3000;
 constexpr qint64 kHdmiQueryIntervalMs = 5000;
 constexpr qint64 kHdmiAckTimeoutMs = 900;
 constexpr qint64 kHdmiRetryGraceMs = 200;
+constexpr qint64 kDisarmHoldMs = 3000;
+constexpr qint64 kDisarmSampleTimeoutMs = 300;
+constexpr qint64 kDisarmResultTimeoutMs = 5000;
 // Motor centers with the aircraft scale from DroneAttitude3D.qml applied.
 constexpr float kAttitudeMotorOffset = 58.0f * 1.13f;
 constexpr float kAttitudeMotorHeight = 6.0f * 1.08f;
@@ -142,7 +146,11 @@ bool HerelinkOsd::handleCameraSelection(Vehicle *vehicle, int input)
     }
     const bool profileAvailable = cameraProfileAvailable();
     if (profileAvailable && !herelinkHdmi()) {
-        return false;
+        const int relay = cameraRelay();
+        if (relay >= 0) {
+            vehicle->sendMavCommand(vehicle->defaultComponentId(), MAV_CMD_DO_SET_RELAY, true, relay, input);
+        }
+        return true;
     }
     const qint64 stamp = now();
     const bool cameraReady = _cameraHeartbeat >= 0 && stamp - _cameraHeartbeat <= kCameraHeartbeatTimeoutMs
@@ -330,6 +338,9 @@ void HerelinkOsd::selectVehicle(Vehicle *vehicle)
     for (const auto &connection : std::as_const(_vehicleConnections)) { disconnect(connection); }
     _vehicleConnections.clear();
     _vehicle = vehicle;
+    _disarmPending = false;
+    _disarmCommandAt = -1;
+    _disarmStatus.clear();
     _radioStatusAt = -1;
     resetAttitude();
     _heartbeat = _altitude = _climb = _battery = -1;
@@ -352,15 +363,30 @@ void HerelinkOsd::selectVehicle(Vehicle *vehicle)
     if (vehicle) {
         _vehicleConnections.append(connect(vehicle, &Vehicle::mavlinkMessageReceived, this, &HerelinkOsd::receive));
         _vehicleConnections.append(connect(vehicle, &Vehicle::vehicleUIDChanged, this, &HerelinkOsd::settingsChanged));
-        _vehicleConnections.append(connect(vehicle, &Vehicle::armedChanged, this, [vehicle](bool armed) {
+        _vehicleConnections.append(connect(vehicle, &Vehicle::armedChanged, this, [this, vehicle](bool armed) {
+            resetDisarmHold();
+            if (!armed) {
+                _disarmPending = false;
+                _disarmStatus.clear();
+            }
             qCInfo(HerelinkControlLog) << "Observed armed state sys/armed:" << vehicle->id() << armed;
         }));
+        _vehicleConnections.append(connect(vehicle->vehicleLinkManager(), &VehicleLinkManager::primaryLinkChanged,
+                                           this, &HerelinkOsd::resetDisarmHold));
+        _vehicleConnections.append(connect(vehicle->vehicleLinkManager(), &VehicleLinkManager::communicationLostChanged,
+                                           this, &HerelinkOsd::resetDisarmHold));
         _vehicleConnections.append(connect(vehicle, &Vehicle::prearmErrorChanged, this,
             [](const QString &error) {
                 qCInfo(HerelinkControlLog) << "Pre-arm status:" << error;
             }));
         _vehicleConnections.append(connect(vehicle, &Vehicle::mavCommandResult, this,
-            [](int vehicleId, int component, int command, int result, int failure) {
+            [this](int vehicleId, int component, int command, int result, int failure) {
+                if (_disarmPending && _vehicle && vehicleId == _vehicle->id()
+                    && component == _vehicle->defaultComponentId() && command == MAV_CMD_COMPONENT_ARM_DISARM) {
+                    _disarmPending = false;
+                    _disarmStatus = failure != Vehicle::MavCmdResultCommandResultOnly ? QStringLiteral("NO ACK")
+                        : result == MAV_RESULT_ACCEPTED ? QStringLiteral("SENT") : QStringLiteral("DENIED");
+                }
                 if (command == MAV_CMD_DO_SET_RELAY || command == MAV_CMD_DO_SET_MODE
                     || command == MAV_CMD_COMPONENT_ARM_DISARM) {
                     qCInfo(HerelinkControlLog) << "Command result sys/comp/command/result/failure:"
@@ -491,6 +517,8 @@ void HerelinkOsd::observeSent(const QByteArray &bytes)
 void HerelinkOsd::selectJoystick(Joystick *joystick)
 {
     disconnect(_axisConnection);
+    disconnect(_buttonConnection);
+    resetDisarmHold();
     _joystick = joystick;
     _startupCameraInput = -1;
     _axes = -1;
@@ -508,7 +536,81 @@ void HerelinkOsd::selectJoystick(Joystick *joystick)
                     _roll = roll; _pitch = pitch; _yaw = yaw; _throttle = throttle;
                 }, Qt::QueuedConnection);
             }, Qt::DirectConnection);
+        _buttonConnection = connect(joystick, &Joystick::buttonValues, this,
+            [this, generation](quint64 buttons) {
+                const qint64 stamp = now();
+                QMetaObject::invokeMethod(this, [this, generation, stamp, buttons] {
+                    if (generation == _joystickGeneration) { updateDisarmChannel(buttons, stamp); }
+                }, Qt::QueuedConnection);
+            }, Qt::DirectConnection);
     }
+}
+
+bool HerelinkOsd::disarmInputAvailable(qint64 stamp) const
+{
+    static const QRegularExpression deviceName(QStringLiteral("^OpenTX TX16SMK3 Joystick(?: #[0-9]+)?$"));
+    if (!_timer.isActive() || !_vehicle || !_joystick) { return false; }
+    const auto link = _vehicle->vehicleLinkManager()->primaryLink().lock();
+    return link && link->isConnected() && _link == link.get()
+        && _vehicle == MultiVehicleManager::instance()->activeVehicle()
+        && _heartbeat >= 0 && stamp - _heartbeat <= 3000
+        && !_vehicle->vehicleLinkManager()->communicationLost()
+        && _joystick->isRunning() && _joystick->axisCount() == 5 && _joystick->buttonCount() == 7
+        && deviceName.match(_joystick->name()).hasMatch()
+        && JoystickManager::instance()->activeJoystickEnabledForActiveVehicle()
+        && _joystick->settings()->calibrated()->rawValue().toBool()
+        && _axes >= 0 && stamp - _axes <= kDisarmSampleTimeoutMs;
+}
+
+void HerelinkOsd::resetDisarmHold()
+{
+    _disarmResetAt = now();
+    _disarmSampleAt = -1;
+    _disarmHoldStart = -1;
+    _disarmReady = false;
+}
+
+void HerelinkOsd::updateDisarmChannel(quint64 buttons, qint64 sampleAt)
+{
+    if (sampleAt <= _disarmResetAt) { return; }
+    const qint64 stamp = now();
+    // The supplied EdgeTX USB profile quantizes CH5 into buttons 0 (low) and 1 (high).
+    // Neither button or both buttons is invalid; FC RC5 telemetry is a different control path.
+    const bool low = buttons & quint64{1};
+    const bool high = buttons & quint64{2};
+    if (!disarmInputAvailable(stamp) || stamp - sampleAt > kDisarmSampleTimeoutMs || low == high) {
+        resetDisarmHold();
+        return;
+    }
+    if (_disarmSampleAt < 0 || sampleAt - _disarmSampleAt > kDisarmSampleTimeoutMs) {
+        resetDisarmHold();
+    }
+    _disarmSampleAt = sampleAt;
+    if (low) {
+        _disarmHoldStart = -1;
+        _disarmReady = true;
+        return;
+    }
+    if (!_disarmReady || !_vehicle || !_vehicle->armed() || _disarmPending) {
+        _disarmHoldStart = -1;
+        return;
+    }
+    if (_disarmHoldStart < 0) {
+        _disarmHoldStart = sampleAt;
+        _disarmStatus.clear();
+        qCInfo(HerelinkControlLog) << "CH5 force-disarm hold started for sys:" << _vehicle->id();
+    }
+    if (sampleAt - _disarmHoldStart < kDisarmHoldMs) { return; }
+    resetDisarmHold(); // Latch until a fresh low position, including after refusal or lost ACK.
+    _disarmCommandAt = stamp;
+    if (_vehicle->isMavCommandPending(_vehicle->defaultComponentId(), MAV_CMD_COMPONENT_ARM_DISARM)) {
+        _disarmStatus = QStringLiteral("BUSY");
+        return;
+    }
+    _disarmPending = true;
+    _disarmStatus = QStringLiteral("SENT");
+    qCWarning(HerelinkControlLog) << "CH5 held for 3 seconds: force-disarm sys:" << _vehicle->id();
+    _vehicle->sendMavCommand(_vehicle->defaultComponentId(), MAV_CMD_COMPONENT_ARM_DISARM, true, 0.0f, 21196.0f);
 }
 
 void HerelinkOsd::receive(const mavlink_message_t &message)
@@ -794,6 +896,7 @@ void HerelinkOsd::refresh()
     }
     LinkInterface *const link = _vehicle ? _vehicle->vehicleLinkManager()->primaryLink().lock().get() : nullptr;
     if (_link != link) {
+        resetDisarmHold();
         disconnect(_sentConnection);
         _link = link;
         _radioStatusAt = -1;
@@ -811,6 +914,22 @@ void HerelinkOsd::refresh()
         }
     }
     refreshAttitude(connected, stamp);
+    if (!disarmInputAvailable(stamp) || _disarmSampleAt < 0
+        || stamp - _disarmSampleAt > kDisarmSampleTimeoutMs) {
+        resetDisarmHold();
+    }
+    if (!connected || !armed) {
+        _disarmPending = false;
+        _disarmStatus.clear();
+    } else if (_disarmCommandAt >= 0 && stamp - _disarmCommandAt > kDisarmResultTimeoutMs) {
+        _disarmPending = false;
+        if (_disarmStatus == QStringLiteral("SENT")) {
+            _disarmStatus = QStringLiteral("NO STATE");
+            _disarmCommandAt = stamp;
+        } else {
+            _disarmStatus.clear();
+        }
+    }
     refreshAttitudeVectors(stamp);
     advanceTimer(connected, armed, stamp);
     if (!connected) {
@@ -915,6 +1034,9 @@ void HerelinkOsd::refresh()
     const int seconds = static_cast<int>(_armedSeconds);
     const bool radioAvailable = connected && fresh(_radioStatusAt, 3000);
     _data = {
+        {QStringLiteral("disarmRemainingMs"), _disarmHoldStart >= 0
+            ? static_cast<int>(qMax(qint64{0}, kDisarmHoldMs - (stamp - _disarmHoldStart))) : 0},
+        {QStringLiteral("disarmStatus"), _disarmStatus},
         {QStringLiteral("connected"), connected}, {QStringLiteral("armed"), armed},
         {QStringLiteral("mode"), connected ? _vehicle->flightMode() : QStringLiteral("—")},
         {QStringLiteral("banner"), banner}, {QStringLiteral("tone"), tone},
